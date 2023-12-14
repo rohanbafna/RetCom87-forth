@@ -162,6 +162,47 @@ _again
         rts
 
 
+;;; .S ( -- ) Display the stack, for debugging purposes.
+        .entry dot_s, ".S"
+        ;; Print number of entries on stack.
+        jsr lit.body
+        .word '<'
+        jsr emit.body
+        jsr bl.body
+        jsr emit.body
+        txa
+        sta tmp
+        lda #init_psp
+        sec
+        sbc tmp
+        lsr a                   ; a := (init_psp-x)/2
+        dex
+        dex
+        sta 0,x
+        jsr dot.body            ; print a
+        jsr lit.body
+        .word '>'
+        jsr emit.body
+        jsr bl.body
+        jsr emit.body
+        ;; Print individual entries on stack.
+        ldy #init_psp-2
+_loop   stx tmp
+        cpy tmp
+        blt _end                ; if y<sp, exit loop
+        lda 0,y                 ; get item y is pointing to
+        dex
+        dex
+        sta 0,x                 ; push it onto stack
+        phy
+        jsr dot.body            ; print cell
+        ply
+        dey
+        dey                     ; go to next item
+        bra _loop
+_end    rts
+
+
 ;;; DROP ( x -- ) Drop one cell from the stack.
         .entry drop, "DROP"
         inx
