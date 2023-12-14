@@ -108,24 +108,57 @@ last_entry := \name
 
 
 ;;; . ( n -- ) Print out n to the screen.
-        ;; TODO: Make this print out in decimal.
+        ;; \ If n is negative, print a - sign.
+        ;; DUP <0  IF  NEGATE CHAR - EMIT  THEN
+        ;; \ Add a sentinel 0 to the stack, under n.
+        ;; 0 SWAP
+        ;; \ Push the ASCII digits of n in reverse order onto the
+        ;; stack.
+        ;; BEGIN
+        ;;    10 /MOD SWAP CHAR 0 + SWAP
+        ;;    DUP 0=
+        ;; UNTIL
+        ;; DROP
+        ;; \ Pop the digits of n and print them out.
+        ;; BEGIN  ?DUP  WHILE  EMIT  AGAIN
+        ;; \ Print a space after the number.
+        ;; BL EMIT ;
         .entry dot, "."
-        sep #FLAGM
-        .as
-
-        lda 1,x
-        jsl SEND_HEX_OUT        ; print msb
-        lda 0,x
-        jsl SEND_HEX_OUT        ; print lsb
-
-        lda #' '
-        jsl PUT_CHR             ; print space
-
-        rep #FLAGM
-        .al
-
-        inx
-        inx                     ; pop n
+        jsr dup.body
+        jsr zero_less_than.body
+        jsr zero_branch.body
+        .word _then
+        jsr negate.body
+        jsr lit.body
+        .word "-"
+        jsr emit.body
+_then
+        jsr lit.body
+        .word 0
+        jsr swap.body
+_begin1
+        jsr lit.body
+        .word 10
+        jsr slash_mod.body
+        jsr swap.body
+        jsr lit.body
+        .word "0"
+        jsr plus.body
+        jsr swap.body
+        jsr dup.body
+        jsr zero_equal.body
+        jsr zero_branch.body
+        .word _begin1
+        jsr drop.body
+_begin2
+        jsr question_dup.body
+        jsr zero_branch.body
+        .word _again
+        jsr emit.body
+        jmp _begin2
+_again
+        jsr bl.body
+        jsr emit.body
         rts
 
 
@@ -142,6 +175,19 @@ last_entry := \name
         dex
         dex
         sta 0,x
+        rts
+
+
+;;; EMIT ( char -- ) Prints out char to the screen.
+        .entry emit, "EMIT"
+        lda 0,x
+        sep #FLAGM
+        .as
+        jsl PUT_CHR
+        rep #FLAGM
+        .al
+        inx
+        inx                     ; pop char
         rts
 
 
@@ -304,6 +350,15 @@ _end    jsr drop.body
         rts
 
 
+;;; NEGATE ( n -- -n )
+        .entry negate, "NEGATE"
+        lda 0,x
+        eor #$FFFF
+        inc a
+        sta 0,x
+        rts
+
+
 ;;; NUMBER ( c-addr u -- n ) Converts the string at c-addr to a
 ;;; number.
         .entry number, "NUMBER"
@@ -408,6 +463,16 @@ _err_msg .null "Could not find word in dictionary"
         inx
         inx                     ; pop n2 off stack
         rts
+
+
+;;; ?DUP ( x -- 0 | x x )
+        .entry question_dup, "?DUP"
+        lda 0,x
+        beq _return             ; if x == 0, return
+        dex
+        dex
+        sta 0,x
+_return rts
 
 
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
@@ -554,6 +619,15 @@ _no_neg_quotient
         rts
 
 
+;;; SWAP ( x1 x2 -- x2 x1 )
+        .entry swap, "SWAP"
+        lda 0,x
+        ldy 2,x
+        sta 2,x
+        sty 0,x
+        rts
+
+
 ;;; TYPEN ( addr -- ) Type a null-terminated string to the terminal.
         .entry typen, "TYPEN"
         lda 0,x                 ; load addr to a
@@ -641,6 +715,28 @@ _finish
         lda cp
         sta 0,x                 ; Put cp on stack.
 
+        rts
+
+
+;;; 0= ( n -- flag ) Return true when n == 0.
+        .entry zero_equal, "0="
+        lda 0,x
+        beq _true
+        stz 0,x                 ; if n!=0, flag = 0
+        rts
+_true   lda #-1
+        sta 0,x                 ; if n==0, flag = -1
+        rts
+
+
+;;; 0< ( n -- flag ) Return true when n < 0.
+        .entry zero_less_than, "0<"
+        lda 0,x
+        bmi _true
+        stz 0,x                 ; if n>=0, flag = 0
+        rts
+_true   lda #-1
+        sta 0,x                 ; if n<0, flag = -1
         rts
 
 
