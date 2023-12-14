@@ -31,17 +31,15 @@ tmp                             ; Temporary storage
 
         jmp quit.body
 
-;;; Dictionary
-
-        ;; Each entry is formatted as a variable-length name field (as
-        ;; a counted string) followed by a 2-byte field for the link,
-        ;; followed by the executable code and/or data field.  The
-        ;; entries are laid out sequentially, and the address of the
-        ;; latest entry is stored at dict_head.  load_dict_head is the
-        ;; latest entry in the dictionary at load time/compile time.
-        ;; Each subroutine is called with JSR and returns with RTS,
-        ;; and should be called with and return with FLAGM and FLAGX
-        ;; reset.  The parameter stack pointer is stored in X.
+;;; Each entry in the dictionary is formatted as a variable-length
+;;; name field (as a counted string) followed by a 2-byte field for
+;;; the link, followed by the executable code and/or data field.  The
+;;; entries are laid out sequentially, and the address of the latest
+;;; entry is stored at dict_head.  load_dict_head is the latest entry
+;;; in the dictionary at load time/compile time.  Each subroutine is
+;;; called with JSR and returns with RTS, and should be called with
+;;; and return with FLAGM and FLAGX reset.  The parameter stack
+;;; pointer is stored in X.
 
 last_entry := 0
 
@@ -52,6 +50,172 @@ last_entry := \name
 \name.body
         .endsegment
 
+
+;;; --------------------------------
+;;;     DATA STACK MANIPULATION
+;;; --------------------------------
+
+;;; ?DUP ( x -- 0 | x x ) Conditionally duplicate the top item on the
+;;; stack if its value is non-zero.
+        .entry question_dup, "?DUP"
+        lda 0,x
+        beq _return             ; if x == 0, return
+        dex
+        dex
+        sta 0,x
+_return rts
+
+
+;;; DEPTH ( -- +n ) Return the number of single-cell values that were
+;;; on the stack before this word executed.
+        .entry depth, "DEPTH"
+        stx tmp
+        lda #init_psp
+        sec
+        sbc tmp
+        lsr a                   ; a := (init_psp-x)/2
+        dex
+        dex
+        sta 0,x
+        rts
+
+
+;;; DROP ( x -- ) Drop one cell from the stack.
+        .entry drop, "DROP"
+        inx
+        inx
+        rts
+
+
+;;; 2DROP ( x1 x2 -- )
+        .entry two_drop, "2DROP"
+        inx
+        inx
+        inx
+        inx
+        rts
+
+
+;;; DUP ( x -- x x ) Duplicate the top cell on the stack.
+        .entry dup, "DUP"
+        lda 0,x
+        dex
+        dex
+        sta 0,x
+        rts
+
+
+;;; 2DUP ( x1 x2 -- x1 x2 x1 x2 )
+        .entry two_dup, "2DUP"
+        lda 2,x                 ; a = x1
+        ldy 0,x                 ; y = x2
+        dex
+        dex
+        dex
+        dex
+        sta 2,x
+        sty 0,x
+        rts
+
+
+;;; NIP ( x1 x2 -- x2 )
+        .entry nip, "NIP"
+        lda 0,x
+        sta 2,x
+        inx
+        inx
+        rts
+
+
+;;; OVER ( x1 x2 -- x1 x2 x1 )
+        .entry over, "OVER"
+        lda 2,x
+        dex
+        dex
+        sta 0,x
+        rts
+
+
+;;; 2OVER ( x1 x2 x3 x4 -- x1 x2 x3 x4 x1 x2 ) Copy cell pair x1,x2 to
+;;; the top of the stack.
+        .entry two_over, "2OVER"
+        lda 6,x                 ; a = x1
+        ldy 4,x                 ; y = x2
+        dex
+        dex
+        dex
+        dex
+        sta 2,x
+        sty 0,x
+        rts
+
+
+;;; PICK ( +n -- x ) Place a copy of the nth stack entry on top of the
+;;; stack, where n=0 refers to the top of the stack.
+        .entry pick, "PICK"
+        lda 0,x                 ; a = n
+        inc a                   ; offset n by 1 to account for n's
+                                ; place on the stack
+        asl a                   ; multiply a by 2 to account for cell
+                                ; size
+        sta tmp
+        txy
+        lda (tmp),y             ; a gets cell at sp+n*2
+        sta 0,x
+        rts
+
+
+;;; ROT ( x1 x2 x3 -- x2 x3 x1 )
+        .entry rot, "ROT"
+        lda 4,x                 ; a = x1
+        ldy 0,x                 ; y = x3
+        sta 0,x
+        lda 2,x                 ; a = x2
+        sty 2,x
+        sta 4,x
+        rts
+
+
+;;; SWAP ( x1 x2 -- x2 x1 )
+        .entry swap, "SWAP"
+        lda 0,x
+        ldy 2,x
+        sta 2,x
+        sty 0,x
+        rts
+
+
+;;; 2SWAP ( x1 x2 x3 x4 -- x3 x4 x1 x2 ) Exchange the top two cell
+;;; pairs.
+        .entry two_swap, "2SWAP"
+        lda 6,x                 ; a = x1
+        ldy 2,x                 ; y = x3
+        sta 2,x
+        sty 6,x
+        lda 4,x                 ; a = x2
+        ldy 0,x                 ; y = x4
+        sta 0,x
+        sty 4,x
+        rts
+
+
+;;; TUCK ( x1 x2 -- x2 x1 x2 ) Place a copy of the top stack item
+;;; below the second stack item.
+        .entry tuck, "TUCK"
+        lda 2,x                 ; a = x1
+        ldy 0,x                 ; y = x2
+        dex
+        dex
+        sty 4,x
+        sta 2,x
+        sty 0,x
+        rts
+
+
+
+;;; --------------------------------
+;;;         UNSORTED WORDS
+;;; --------------------------------
 
 ;;; AND ( x1 x2 -- x3 ) x3 is the bitwise and of x1 and x2.
         .entry and_, "AND"
@@ -291,15 +455,7 @@ _again
         jsr emit.body
         jsr bl.body
         jsr emit.body
-        txa
-        sta tmp
-        lda #init_psp
-        sec
-        sbc tmp
-        lsr a                   ; a := (init_psp-x)/2
-        dex
-        dex
-        sta 0,x
+        jsr depth.body
         jsr dot.body            ; print a
         jsr lit.body
         .word '>'
@@ -322,22 +478,6 @@ _loop   stx tmp
         dey                     ; go to next item
         bra _loop
 _end    rts
-
-
-;;; DROP ( x -- ) Drop one cell from the stack.
-        .entry drop, "DROP"
-        inx
-        inx
-        rts
-
-
-;;; DUP ( x -- x x ) Duplicate the top cell on the stack.
-        .entry dup, "DUP"
-        lda 0,x
-        dex
-        dex
-        sta 0,x
-        rts
 
 
 ;;; EMIT ( char -- ) Prints out char to the screen.
@@ -642,15 +782,6 @@ _end    jsr drop.body
         rts
 
 
-;;; NIP ( x1 x2 -- x2 )
-        .entry nip, "NIP"
-        lda 0,x
-        sta 2,x
-        inx
-        inx
-        rts
-
-
 ;;; <> ( x1 x2 -- flag ) flag is true when x1 is not equal to x2.
         .entry not_equal, "<>"
         lda 0,x
@@ -782,15 +913,6 @@ _err_msg .null "Could not find word in dictionary"
         rts
 
 
-;;; OVER ( x1 x2 -- x1 x2 x1 )
-        .entry over, "OVER"
-        lda 2,x
-        dex
-        dex
-        sta 0,x
-        rts
-
-
 ;;; PARSE <text> Parse a string up until the next occurrence of the
 ;;; given delimiter and return the address and length.
         ;; : PARSE  ( char -- addr n )
@@ -898,16 +1020,6 @@ _else1  jsr quit.body
 _then1  rts
 
 
-;;; ?DUP ( x -- 0 | x x )
-        .entry question_dup, "?DUP"
-        lda 0,x
-        beq _return             ; if x == 0, return
-        dex
-        dex
-        sta 0,x
-_return rts
-
-
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
 ;;; and interpret a line of code.
         .entry quit, "QUIT"
@@ -1002,17 +1114,6 @@ _fin    stx n_tib
         .sint -1
         jsr state.body
         jsr store.body
-        rts
-
-
-;;; ROT ( x1 x2 x3 -- x2 x3 x1 )
-        .entry rot, "ROT"
-        lda 4,x                 ; a = x1
-        ldy 0,x                 ; y = x3
-        sta 0,x
-        lda 2,x                 ; a = x2
-        sty 2,x
-        sta 4,x
         rts
 
 
@@ -1147,15 +1248,6 @@ _val    .word 0
         rts
 
 
-;;; SWAP ( x1 x2 -- x2 x1 )
-        .entry swap, "SWAP"
-        lda 0,x
-        ldy 2,x
-        sta 2,x
-        sty 0,x
-        rts
-
-
 ;;; >R ( S: x -- ) ( R: -- x ) Pop the top item from the data stack
 ;;; and place it on the return stack.
         .entry to_r, ">R"
@@ -1166,28 +1258,6 @@ _val    .word 0
         pha                     ; place x on return stack
         phy                     ; push return address back
         rts                     ; return
-
-
-;;; 2DROP ( x1 x2 -- )
-        .entry two_drop, "2DROP"
-        inx
-        inx
-        inx
-        inx
-        rts
-
-
-;;; 2DUP ( x1 x2 -- x1 x2 x1 x2 )
-        .entry two_dup, "2DUP"
-        lda 2,x                 ; a = x1
-        ldy 0,x                 ; y = x2
-        dex
-        dex
-        dex
-        dex
-        sta 2,x
-        sty 0,x
-        rts
 
 
 ;;; 2R@ ( S: -- x1 x2 ) ( R: x1 x2 -- x1 x2 )
@@ -1394,3 +1464,4 @@ cp_val  = *
 
 *       = dict_head
         .word last_entry        ; Fill default dict head to last entry
+
