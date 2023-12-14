@@ -9,6 +9,7 @@
         ;; Direct page variables
         .org 0xC0
 tmp:    .resb 2                 ; Temporary storage
+sp:     .dw stack+0x100         ; Stack pointer
 lx:     .resb 2                 ; Line index
 nlx:    .resb 2                 ; Next line index
 done:   .resb 1                 ; Nonzero if we've finished line
@@ -171,16 +172,25 @@ parsenumloop:
 
 parsenumfinish:                 ; Negate parsed number (in tmp) if neg
         lda neg
-        beq parsenumprint
-
         rep #FLAGM
+        beq parsenumpush
+
         lda.w #0
         sec
         sbc tmp
         sta tmp                 ; negate tmp and store in tmp
-        sep #FLAGM
+
+parsenumpush:
+        ;; Push the parsed number on the stack.
+        lda sp
+        sec
+        sbc.w #2
+        sta sp
+        lda tmp
+        sta (sp)
 
 parsenumprint:                  ; Print the parsed number (in tmp)
+        sep #FLAGM
         lda.b #0
         ldx.w #numm
         jsl PUT_STR             ; print numm message
@@ -204,8 +214,9 @@ parsenumerror:
 
         jmp repeat
 
-        ;; Other variables
+        ;; Other data
 lbuf:   .resb 0x100             ; Line buffer
+stack:  .resb 0x100             ; Data stack
 
         ;; Dictionary
 
