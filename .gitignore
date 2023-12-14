@@ -1,3 +1,4 @@
 *.hex
 *.lst
 .dir-locals.el
+*~
