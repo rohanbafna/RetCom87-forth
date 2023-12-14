@@ -1207,6 +1207,35 @@ _end    jsr two_r_from.body
         rts
 
 
+;;; PARSE-NAME <text> Parse a space-separated name and return the
+;;; address and length.
+        ;; : PARSE-NAME  ( -- addr n )
+        ;;    \ find next non-space char in source
+        ;;    SOURCE >IN @ /STRING BL ['] = SCAN-WHILE DROP   ( next )
+        ;;    \ update >IN to offset of next from source
+        ;;    SOURCE DROP - >IN !   ( )
+        ;;    \ parse a space separated word
+        ;;    BL PARSE ;
+        .entry parse_name, "PARSE-NAME"
+        jsr source.body
+        jsr toin.body
+        jsr fetch.body
+        jsr slash_string.body
+        jsr bl.body
+        jsr lit.body
+        .word equal.body
+        jsr scan_while.body
+        jsr drop.body
+        jsr source.body
+        jsr drop.body
+        jsr minus.body
+        jsr toin.body
+        jsr store.body
+        jsr bl.body
+        jsr parse.body
+        rts
+
+
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
 ;;; and interpret a line of code.
         .entry quit, "QUIT"
