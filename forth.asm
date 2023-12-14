@@ -1024,15 +1024,52 @@ _nomatch
         rts
 
 
+;;; FIND-NAME ( addr u -- addr u 0 | xt 1 | xt -1 ) Find the word
+;;; given by addr u in the dictionary.  If found, return the execution
+;;; token and 1 if immediate, else -1.  Otherwise return addr u and 0.
+        ;; : FIND-NAME
+        ;;    LATEST @   ( word len entry )
+        ;;    BEGIN
+        ;;       >R 2DUP R@   ( word len word len entry R: entry )
+        ;;       MATCHES?  IF   ( word len R: entry )
+        ;;          2DROP R> >BODY -1 EXIT   ( xt -1 )
+        ;;       THEN   ( word len R: entry )
+        ;;       R> PREV-ENTRY DUP 0=   ( word len prev flag )
+        ;;    UNTIL ;   ( word len 0 )
+        .entry find_name, "FIND-NAME"
+        jsr latest.body
+        jsr fetch.body
+_begin  jsr to_r.body
+        jsr two_dup.body
+        jsr r_fetch.body
+        jsr matches_question.body
+        jsr zero_branch.body
+        .word _then
+        jsr two_drop.body
+        jsr r_from.body
+        jsr to_body.body
+        jsr lit.body
+        .sint -1
+        rts
+_then   jsr r_from.body
+        jsr prev_entry.body
+        jsr dup.body
+        jsr zero_equal.body
+        jsr zero_branch.body
+        .word _begin
+        rts
+
+
 ;;; MATCHES? ( addr1 u addr2 -- flag ) Compare the string given by
 ;;; addr1 u to the dictionary entry given by addr2.  Flag is -1 if
 ;;; they match and 0 if not.
-        ;; : MATCHES?   COUNT NOCTRL AND   ( addr1 u addr2' u2 )
+        ;; : MATCHES?
+        ;;    COUNT NOCTRL AND   ( addr1 u addr2' u2 )
         ;;    ROT OVER =  IF   ( addr1 addr2' u2 )
         ;;       =STRING   ( flag )
-        ;;    ELSE
-        ;;       2DROP DROP 0
-        ;;    THEN ;
+        ;;    ELSE   ( addr1 addr2' u2 )
+        ;;       2DROP DROP 0   ( 0 )
+        ;;    THEN ;   ( flag )
         .entry matches_question, "MATCHES?"
         jsr count.body
         jsr lit.body
@@ -1063,11 +1100,29 @@ _then   rts
 ;;; PREV-ENTRY ( addr -- addr' | 0 ) Replace addr, which points to a
 ;;; dictionary entry, with a pointer to the previous dictionary entry,
 ;;; or 0 if addr was the first dictionary entry.
-        ;; : PREV-ENTRY ( addr -- addr' | 0 )   COUNT + @ ;
+        ;; : PREV-ENTRY   COUNT NOCTRL AND + @ ;
         .entry prev_entry, "PREV-ENTRY"
         jsr count.body
+        jsr lit.body
+        .word noctrl
+        jsr and_.body
         jsr plus.body
         jsr fetch.body
+        rts
+
+
+;;; >BODY ( addr -- addr ) Replace addr, which points to a dictionary
+;;; entry, with a pointer to the body of the entry.
+        ;; : >BODY   COUNT NOCTRL AND + 2 + ;
+        .entry to_body, ">BODY"
+        jsr count.body
+        jsr lit.body
+        .word noctrl
+        jsr and_.body
+        jsr plus.body
+        jsr lit.body
+        .sint 2
+        jsr plus.body
         rts
 
 
