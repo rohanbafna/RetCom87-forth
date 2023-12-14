@@ -86,10 +86,14 @@ tmp                             ; Temporary storage
         ;; of the time) then the upper bytes of X and Y would be lost.
         ;; I didn't save Y originally when I wrote this and it caused
         ;; lots of strange bugs!
-kbint   phy
+kbint   rep #FLAGM|FLAGX        ; always push 16-bit values so we know
+                                ; what the return stack looks
+                                ; like---useful for debugging
+        .al
+        .xl
+        phy
         phx
         pha
-        php
 
         sep #FLAGM|FLAGX        ; 8-bit memory and index mode
         .as
@@ -135,16 +139,43 @@ _next   inx
         inx
         stx kbstate             ; increment state by 2 since addresses
                                 ; are 2 bytes long
-_ret    plp
+_ret    rep #FLAGM|FLAGX
+        .al
+        .xl
         pla
         plx
         ply
         rti
+        .as
+        .xs
 
         ;; Stop bit: errors if bit is not 1, otherwise finishes
         ;; writing the current byte.
 _stop   beq _error              ; if bit read is 0, discard packet
-        inc kbwoff
+
+        ;; Check if key just presssed is ESC.  If so, print the
+        ;; program counter at the time of the interrupt before
+        ;; returning for debugging purposes.
+        ldx kbwoff
+        lda kbbuf,x             ; get the last scancode
+        cmp $76                 ; does it equal escape?
+        bne _flush              ; if not, return from interrupt
+
+        rep #FLAGM              ; 16-bit accumulator
+        lda 8,s                 ; offset 8 on stack is PC
+        ;; print PC to monitor
+        sep #FLAGM
+        cli
+        xba
+        jsl SEND_HEX_OUT
+        xba
+        jsl SEND_HEX_OUT
+        jsl SEND_CR
+        sei
+        bra _error
+
+_flush  inc kbwoff
+
         ;; Fall through to error since we need to clear the next byte
         ;; and state anyways.
 
@@ -153,7 +184,8 @@ _error  ldx kbwoff
         stz kbbuf,x             ; discard current byte
         stz kbstate             ; reset state
         stz kbpar               ; reset parity
-        bra _ret                ; return from interrupt
+
+        bra _ret
 
         ;; The jump table used to select the proper handler.
 _jtable .word _start
@@ -1230,6 +1262,7 @@ _newev  lda kbbuf,y             ; A gets the latest key event
         sta 0,x
         rts
 
+
 ;;; EMIT ( char -- ) Prints out char to the screen.
         .entry emit, "EMIT"
         lda 0,x
@@ -1268,74 +1301,101 @@ _newev  lda kbbuf,y             ; A gets the latest key event
 _val    .word 0
 
 
-;;; PS2KEY ( -- char ) Wait for PS/2 keyboard input and return the
-;;; character corresponding to the key pressed.
-        ;; : PS2KEY
-        ;;    BEGIN
-        ;;       EKEY
-        ;;       \ if shift, set modifier bit
-        ;;       DUP $12 =  IF  KEYMOD @ 1 OR KEYMOD ! DROP 0  THEN
-        ;;       \ if F0 (release), read next scancode and unset
-        ;;       \ modifier bit or ignore
-        ;;       DUP $F0 =  IF
-        ;;          DROP EKEY $12 =  IF  KEYMOD @ $FE AND KEYMOD !  THEN 0
-        ;;       THEN
-        ;;       KEYMOD @ 1 AND  IF  SSCODE  ELSE  SCODE  THEN  + C@ ?DUP
-        ;;    UNTIL ;
-        .entry pstwo_key, "PS2KEY"
-_begin  jsr ekey.body
+;;; EKEY>MODMASK ( x1 -- x2 ) Converts the given event x1 to the
+;;; modifier bitmask x2.
+        ;; : EKEY>MODMASK
+        ;;    DUP $12 =  IF
+        ;;       1
+        ;;    ELSE  DUP $59 =  IF
+        ;;       2
+        ;;    ELSE
+        ;;       0
+        ;;    THEN THEN NIP ;
+        .entry ekey_to_modmask, "EKEY>MODMASK"
         jsr dup.body
         jsr lit.body
         .word $12
         jsr equal.body
         jsr zero_branch.body
-        .word _then1
-        jsr keymod.body
-        jsr fetch.body
+        .word _not_ls
         jsr lit.body
         .sint 1
+        jmp _then
+_not_ls jsr dup.body
+        jsr lit.body
+        .word $59
+        jsr equal.body
+        jsr zero_branch.body
+        .word _not_rs
+        jsr lit.body
+        .sint 2
+        jmp _then
+_not_rs jsr lit.body
+        .sint 0
+_then   jsr nip.body
+        rts
+
+
+;;; PS2KEY ( -- char ) Wait for PS/2 keyboard input and return the
+;;; character corresponding to the key pressed.
+        ;; : PS2KEY
+        ;;    BEGIN
+        ;;       EKEY
+        ;;       \ if modifier, set associated bit
+        ;;       DUP EKEY>MODMASK  KEYMOD @  OR  KEYMOD !
+        ;;       \ if F0 (release), read next scancode and unset
+        ;;       \ modifier bit or ignore
+        ;;       DUP $F0 =  IF
+        ;;          DROP EKEY EKEY>MODMASK INVERT  KEYMOD @  AND  KEYMOD !  0
+        ;;       THEN
+        ;;       \ if either of the shift bits are on, use shift table
+        ;;       KEYMOD @ 3 AND  IF  SSCODE  ELSE  SCODE  THEN  + C@
+        ;;    ?DUP UNTIL ;
+        .entry pstwo_key, "PS2KEY"
+_begin  jsr ekey.body
+
+        jsr dup.body
+        jsr ekey_to_modmask.body
+        jsr keymod.body
+        jsr fetch.body
         jsr or.body
         jsr keymod.body
         jsr store.body
-        jsr drop.body
-        jsr lit.body
-        .word 0
-_then1  jsr dup.body
+
+        jsr dup.body
         jsr lit.body
         .word $F0
         jsr equal.body
         jsr zero_branch.body
-        .word _then2
+        .word _then1
+
         jsr drop.body
         jsr ekey.body
-        jsr lit.body
-        .word $12
-        jsr equal.body
-        jsr zero_branch.body
-        .word _then3
+        jsr ekey_to_modmask.body
+        jsr invert.body
         jsr keymod.body
         jsr fetch.body
-        jsr lit.body
-        .word $FE
         jsr and_.body
         jsr keymod.body
         jsr store.body
-_then3  jsr lit.body
+        jsr lit.body
         .sint 0
-_then2  jsr keymod.body
+
+_then1  jsr keymod.body
         jsr fetch.body
         jsr lit.body
-        .word 1
+        .word 3
         jsr and_.body
         jsr zero_branch.body
-        .word _else4
+        .word _else2
         jsr lit.body
         .word _sscode
-        jmp _then4
-_else4  jsr lit.body
+        jmp _then2
+_else2  jsr lit.body
         .word _scode
-_then4  jsr plus.body
+_then2  jsr plus.body
         jsr c_fetch.body
+
         jsr question_dup.body
         jsr zero_branch.body
         .word _begin
@@ -1378,6 +1438,8 @@ _sscode .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$09,'~',$00 ; 
         .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; D
         .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; E
         .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; F
+
+
 
 ;;; REFILL ( -- ) Get a line of characters and store it in the TIB,
 ;;; then set >IN to 0.
