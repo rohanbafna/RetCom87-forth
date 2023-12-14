@@ -104,24 +104,16 @@ wordcmpfail:
         bra searchloop
 
 searchsuccess:
-        ;; We found a match.
-
-        ;; Print parsed word.
-        lda.b #0
-        ldx.w #wordm
-        jsl PUT_STR             ; print wordm message
-
+        ;; We found a match.  Call subroutine.
         rep #FLAGM
-        lda.w #lbuf
+        lda tmp                 ; load saved dict entry pointer
         clc
-        adc lx
-        tax                     ; x gets lbuf+lx
-        sep #FLAGM
-        lda.b #0
-        jsl PUT_STR             ; print parsed word
+        adc.w #DICT_ENTRY_OFFSET_FUNC ; get to address of func field
+        tax
+        jsr (0,x)
 
 repeat:
-        jsl SEND_CR             ; new line
+        sep #FLAGM
         lda done
         beq mainloop            ; if not done, repeat
 
@@ -189,17 +181,6 @@ parsenumpush:
         lda tmp
         sta (sp)
 
-parsenumprint:                  ; Print the parsed number (in tmp)
-        sep #FLAGM
-        lda.b #0
-        ldx.w #numm
-        jsl PUT_STR             ; print numm message
-
-        lda tmp+1
-        jsl SEND_HEX_OUT        ; print msb
-        lda tmp
-        jsl SEND_HEX_OUT        ; print lsb
-
         bra repeat
 
 parsenumsetnegflag:
@@ -220,17 +201,20 @@ stack:  .resb 0x100             ; Data stack
 
         ;; Dictionary
 
-        ;; Each entry is formatted as a 0x20 byte name field.  The
-        ;; entries are laid out sequentially, and the address of the
-        ;; latest entry is stored at dicth.  ldicth ("load-time
-        ;; dictionary head") is the latest entry in the dictionary at
-        ;; load time/compile time.
-        .set DICT_ENTRY_SIZE=0x20
+        ;; Each entry is formatted as a 0x20 byte name field followed
+        ;; by a 2-byte field for the code address.  The entries are
+        ;; laid out sequentially, and the address of the latest entry
+        ;; is stored at dicth.  ldicth ("load-time dictionary head")
+        ;; is the latest entry in the dictionary at load time/compile
+        ;; time.
+        .set DICT_ENTRY_SIZE=0x22
+        .set DICT_ENTRY_OFFSET_FUNC=0x20
 
-        .macro ENTRY(name)
+        .macro ENTRY(name, func)
         .scope
 entry:  .asciiz name
-        .org entry+DICT_ENTRY_SIZE
+        .org entry+DICT_ENTRY_OFFSET_FUNC
+        .dw func
         .ends
         .endm
 
@@ -238,10 +222,34 @@ entry:  .asciiz name
         .db 0
         .resb DICT_ENTRY_SIZE-1
 
-        ENTRY("test")
-ldicth: ENTRY("another")
+ldicth: ENTRY(".", print_num)
+
+        ;; Subroutines for each Forth word.  Each subroutine is called
+        ;; with JSR and returns with RTS.
+
+print_num:
+        ;; Pops the first number off the stack and prints it to the
+        ;; monitor.
+        sep #FLAGM
+        rep #FLAGX
+
+        ldy #1
+        lda (sp),y
+        jsl SEND_HEX_OUT        ; print msb
+        dey
+        lda (sp),y
+        jsl SEND_HEX_OUT        ; print lsb
+
+        lda.b #' '
+        jsl PUT_CHR
+
+        rep #FLAGM
+        lda sp
+        clc
+        adc.w #2
+        sta sp
+
+        rts
 
         ;; Strings
-wordm:  .asciiz "Parsed word: "
-numm:   .asciiz "Parsed number: "
 numerrm:.asciiz "Error parsing number"
