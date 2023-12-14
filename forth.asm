@@ -13,10 +13,8 @@ noctrl  = $1F                   ; no control bits bitmask
 
 ;;; Direct page variables
 *       = $C0
-dict_head .word ?               ; Pointer to the latest entry in dict
 cp_v    .word ?                 ; Pointer to the next cell in dict
 toin_v  .word ?                 ; Current offset into TIB.
-n_tib   .word ?                 ; Number of characters in TIB.
 tmp                             ; Temporary storage
 
 ;;; Main program
@@ -29,17 +27,39 @@ tmp                             ; Temporary storage
         .al
         .xl
 
+        ;; Reset dictionary.
+        lda #cp_val
+        sta cp_v
+        lda #load_last_entry
+        sta dict_head
+
+        ;; Clear return and data stacks.
+        ldx #init_psp
+        lda #init_rsp
+        tcs
+        ;; Set STATE to interpretation.
+        jsr left_bracket.body
+
+        ;; Load boot program.
+        lda #boot
+        sta s_addr
+        lda #bootend-boot
+        sta n_tib
+        stz toin_v
+        jsr interpret.body
+
         jmp quit.body
+
+boot    .binary "boot.preprocessed"
+bootend
 
 ;;; Each entry in the dictionary is formatted as a variable-length
 ;;; name field (as a counted string) followed by a 2-byte field for
 ;;; the link, followed by the executable code and/or data field.  The
 ;;; entries are laid out sequentially, and the address of the latest
-;;; entry is stored at dict_head.  load_dict_head is the latest entry
-;;; in the dictionary at load time/compile time.  Each subroutine is
-;;; called with JSR and returns with RTS, and should be called with
-;;; and return with FLAGM and FLAGX reset.  The parameter stack
-;;; pointer is stored in X.
+;;; entry is stored in LATEST.  Each subroutine is called with JSR and
+;;; returns with RTS, and should be called with and return with FLAGM
+;;; and FLAGX reset.  The parameter stack pointer is stored in X.
 
 last_entry := 0
 
@@ -1008,6 +1028,7 @@ _then   rts
         jsr lit.body
         .word dict_head
         rts
+dict_head .word 0
 
 
 ;;; PREV-ENTRY ( addr -- addr' | 0 ) Replace addr, which points to a
@@ -1214,8 +1235,7 @@ _end    jsr two_r_from.body
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
 ;;; and interpret a line of code.
         .entry quit, "QUIT"
-        ;; Clear return and data stacks.
-        ldx #init_psp
+        ;; Clear return stack.
         lda #init_rsp
         tcs
         ;; Set STATE to interpretation.
@@ -1247,13 +1267,23 @@ _comp   .null " compiled", $0D
 
 ;;; SOURCE ( -- addr u ) Return the address and length of the input
 ;;; buffer.
+        ;; : SOURCE   (SOURCE) 2@ ;
         .entry source, "SOURCE"
-        jsr lit.body
-        .word tib
-        jsr lit.body
-        .word n_tib
-        jsr fetch.body
+        jsr source_.body
+        jsr two_fetch.body
         rts
+
+
+;;; (SOURCE) ( -- addr ) Return the address of two cells with the
+;;; first containing the length of the input buffer and the second
+;;; containing the address of the input buffer.
+        .entry source_, "(SOURCE)"
+        jsr lit.body
+        .word _data
+        rts
+_data
+n_tib   .word 0
+s_addr  .word tib
 
 
 ;;; >IN ( -- addr ) Return the address of a cell that contains the
@@ -1759,8 +1789,11 @@ _fin    stx n_tib
         ldx tmp
         rep #FLAGM
         .al
+
         ;; Clear >IN.
         stz toin_v
+        lda #tib
+        sta s_addr
 
         rts
 
@@ -1884,10 +1917,5 @@ _true   lda #-1
         rts
 
 
-cp_val  = *
-*       = cp_v
-        .word cp_val            ; Fill default code pointer
-
-*       = dict_head
-        .word last_entry        ; Fill default dict head to last entry
-
+cp_val  = *                     ; Current pointer at load time
+load_last_entry = last_entry    ; Last entry at load time
