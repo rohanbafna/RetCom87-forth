@@ -919,111 +919,6 @@ _then   jsr one_plus.body
 ;;;           DICTIONARY
 ;;; --------------------------------
 
-;;; FIND ( c-addr -- c-addr 0 | xt 1 | xt -1 ) Find the definition
-;;; corresponding to the c-addr word and either return c-addr and zero
-;;; (if not found), xt and 1 (if found and immediate), or xt and -1
-;;; (if found and not immediate).
-        .entry find, "FIND"
-_count  = tmp                   ; Count of characters to compare
-_sp     = tmp+2                 ; Saved stack pointer
-_ep     = tmp+4                 ; Dict entry pointer
-_wp     = tmp+6                 ; Word pointer
-
-        lda 0,x
-        sta _wp                 ; Save word pointer
-
-        sep #FLAGM
-        .as
-        lda (0,x)               ; Get count from c-addr
-        inc a                   ; Increment to account for count byte
-        sta _count              ; Save count
-        stz _count+1            ; Zero out high byte of tmp
-
-        stx _sp                 ; Save stack pointer
-        ldx dict_head           ; x points to the dict entry
-
-        ;; Compare word to dict entry's word.
-_loop
-        stx _ep                 ; Save dict entry pointer
-
-        ;; Compare count bytes (we need to mask out the control bits).
-        lda 0,x                 ; load count byte from entry
-        bit #smudge             ; test smudge bit
-        bne _nomatch            ; if smudge bit set, ignore entry
-        and #noctrl             ; ignore control bits
-        cmp (_wp)               ; compare with count from word
-        bne _nomatch            ; break if not equal (no match)
-        inx                     ; go to next char in dict entry
-
-        ldy #1                  ; Y indexes to the start of word, past
-                                ; count byte
-
-        ;; Check if the dict entry name matches the current word.
-_test_entry
-        ;; On each iteration, compare current character in the word
-        ;; with the corresponding character in the dict entry.  If not
-        ;; equal, break (no match).  Increment Y and if y >= count,
-        ;; found a match.
-        lda (_wp),y             ; load current char in word
-        cmp 0,x                 ; compare with char in dict entry
-        bne _nomatch            ; break if not equal (no match)
-        inx                     ; go to next char in dict entry
-        iny                     ; go to next char in word
-        cpy _count
-        bmi _test_entry         ; if y < count, repeat
-
-_match
-        ;; We found a match.  Push return values on stack and return.
-        inx
-        inx                     ; x now points to xt
-        txy                     ; y points to xt
-        ldx _sp                 ; restore sp to x
-        sty 0,x                 ; replace c-addr with xt
-
-        ldy #1
-        lda (_ep)               ; check count byte of array
-        bit #precedence         ; check precedence flag
-        bne _imm                ; if set, push 1 instead of -1
-        ldy #-1                 ; set y to -1
-_imm    dex
-        dex
-        sty 0,x                 ; push 1 or -1 to stack
-
-        rep #FLAGM
-        .al
-        rts
-
-_nomatch
-        ;; The word didn't match the dictionary entry, so go to the
-        ;; next one.
-        .as
-        rep #FLAGM
-        .al
-        lda (_ep)               ; a gets count byte of entry
-        and #noctrl             ; clear high byte and control bits
-        inc a                   ; account for count byte
-        tay                     ; y gets count
-        lda (_ep),y             ; a gets dict-entry at offset count
-                                ; (lf field)
-        sep #FLAGM
-        .as
-        tax                     ; x gets lf field
-        ;; If dict entry's link is empty, we're at the end of the
-        ;; dictionary and didn't find a match, so return.  Otherwise
-        ;; try again with the next entry.
-        bne _loop
-
-        ;; No match found.  Push 0 and return.
-        rep #FLAGM
-        .al
-        ldx _sp                 ; restore sp to x
-        dex
-        dex
-        stz 0,x                 ; push 0
-
-        rts
-
-
 ;;; FIND-NAME ( addr u -- addr u 0 | xt 1 | xt -1 ) Find the word
 ;;; given by addr u in the dictionary.  If found, return the execution
 ;;; token and 1 if immediate, else -1.  Otherwise return addr u and 0.
@@ -1031,9 +926,9 @@ _nomatch
         ;;    LATEST @   ( word len entry )
         ;;    BEGIN
         ;;       >R 2DUP R@   ( word len word len entry R: entry )
-        ;;       MATCHES?  IF   ( word len R: entry )
-        ;;          2DROP R> >BODY   ( xt )
-        ;;          DUP NOT-IMMEDIATE? 2* 1+ EXIT   ( xt -1 | xt 1 )
+        ;;       MATCHES? R@ VISIBLE? AND  IF   ( word len R: entry )
+        ;;          2DROP R@ >BODY   ( xt R: entry )
+        ;;          R> NOT-IMMEDIATE? 2* 1+ EXIT   ( xt -1 | xt 1 )
         ;;       THEN   ( word len R: entry )
         ;;       R> PREV-ENTRY DUP 0=   ( word len prev flag )
         ;;    UNTIL ;   ( word len 0 )
@@ -1044,12 +939,15 @@ _begin  jsr to_r.body
         jsr two_dup.body
         jsr r_fetch.body
         jsr matches_question.body
+        jsr r_fetch.body
+        jsr visible_question.body
+        jsr and_.body
         jsr zero_branch.body
         .word _then
         jsr two_drop.body
-        jsr r_from.body
+        jsr r_fetch.body
         jsr to_body.body
-        jsr dup.body
+        jsr r_from.body
         jsr not_immediate_question.body
         jsr two_star.body
         jsr one_plus.body
@@ -1065,13 +963,13 @@ _then   jsr r_from.body
 
 ;;; NOT-IMMEDIATE? ( addr -- flag ) Return 0 if the dictionary entry
 ;;; given by addr is immediate or -1 otherwise.
-        ;; : NOT-IMMEDIATE?   C@ PRECEDENCE AND 0<> ;
+        ;; : NOT-IMMEDIATE?   C@ PRECEDENCE AND 0= ;
         .entry not_immediate_question, "NOT-IMMEDIATE?"
         jsr c_fetch.body
         jsr lit.body
         .word precedence
         jsr and_.body
-        jsr zero_not_equal.body
+        jsr zero_equal.body
         rts
 
 
@@ -1138,6 +1036,18 @@ _then   rts
         jsr lit.body
         .sint 2
         jsr plus.body
+        rts
+
+
+;;; VISIBLE? ( addr -- flag ) Return 0 if the dictionary entry
+;;; given by addr is smudged or -1 otherwise.
+        ;; : VISIBLE?   C@ SMUDGE AND 0= ;
+        .entry visible_question, "VISIBLE?"
+        jsr c_fetch.body
+        jsr lit.body
+        .word smudge
+        jsr and_.body
+        jsr zero_equal.body
         rts
 
 
@@ -1351,62 +1261,6 @@ _comp   .null " compiled", $0D
         .entry toin, ">IN"
         jsr lit.body
         .word toin_v
-        rts
-
-
-;;; WORD ( char -- addr ) Parse a word delimited by char from the
-;;; input stream, skipping initial occurrences of char, and store the
-;;; parsed word as a counted string in the dictionary, returning the
-;;; location of the word as addr.
-        .entry word, "WORD"
-        stx tmp                 ; save sp in tmp
-        lda 0,x
-        sta tmp+2               ; store delim in tmp+2
-
-        ldy #0                  ; y is length of word
-        ldx toin_v              ; x gets next index to check.
-        dex
-
-        sep #FLAGM
-        .as
-
-        ;; Skip delims until the start of the word.
-_skip_delims
-        inx
-        cpx n_tib
-        beq _finish             ; If end of input, stop
-        lda TIB,x               ; Load the current char into A
-        cmp tmp+2               ; Compare with delimiter
-        beq _skip_delims        ; If delim, repeat
-
-        ;; Copy word into cp until delim is reached.
-_grab_word
-        iny                     ; Go to next char in output buffer
-        sta (cp_v),y            ; Store character into cp_v at offset
-                                ; y
-        inx
-        cpx n_tib
-        beq _finish             ; If end of input, found whole word
-        lda TIB,x               ; Get next character
-        cmp tmp+2               ; Compare with delimiter
-        bne _grab_word          ; If delim, found whole word, else loop
-        inx                     ; Move past delim if present
-
-        ;; Write the length of the word into the first char and
-        ;; return.
-_finish
-        tya
-        and #$EF                ; clear msb
-        sta (cp_v)              ; Store length into first char.
-
-        stx toin_v              ; Update toin
-        ldx tmp                 ; restore sp into x
-
-        rep #FLAGM
-        .al
-        lda cp_v
-        sta 0,x                 ; Put cp_v on stack.
-
         rts
 
 
@@ -1849,7 +1703,7 @@ _err_msg .null "Could not find word in dictionary"
 ;;; POSTPONE <name> Append the compilation behavior of name to
 ;;; the current definition.
         ;; : POSTPONE ( -- )
-        ;;    BL WORD FIND DUP  IF
+        ;;    PARSE-NAME FIND-NAME DUP  IF
         ;;       0>  IF \ name is immediate
         ;;          COMPILE,
         ;;       ELSE \ name is not immediate
@@ -1860,9 +1714,8 @@ _err_msg .null "Could not find word in dictionary"
         ;;    THEN
         ;; ; IMMEDIATE
         .entry postpone, "POSTPONE", true
-        jsr bl.body
-        jsr word.body
-        jsr find.body
+        jsr parse_name.body
+        jsr find_name.body
         jsr dup.body
         jsr zero_branch.body
         .word _else1
