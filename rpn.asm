@@ -1,20 +1,27 @@
-        ;; parser -- WIP parser for a FORTH interpreter
+;;; rpn -- WIP FORTH interpreter
 
-        ;; Reads a line, grabs space-separated words, and recognizes
-        ;; numbers prefixed with !, which it then prints out in hex.
+;;; Basic FORTH implementation, reads and executes one line at a time.
+;;; Supports the words +, -, and .
 
         .65816
         .include "header.inc"
 
         ;; Direct page variables
         .org 0xC0
-tmp:    .resb 2                 ; Temporary storage
-sp:     .dw stack+0x100         ; Stack pointer
-lx:     .resb 2                 ; Line index
-nlx:    .resb 2                 ; Next line index
-done:   .resb 1                 ; Nonzero if we've finished line
-neg:    .resb 1                 ; Negative number flag for parsenum
-dicth:  .dw ldicth              ; Dictionary head
+tmp:
+        .resb 2                 ; Temporary storage
+sp:
+        .dw stack+0x100         ; Stack pointer
+word:
+        .resb 2                 ; Index of word in linebuf.
+after_word:
+        .resb 2                 ; Index after word in linebuf.
+done:
+        .resb 1                 ; Nonzero if we've finished line
+neg:
+        .resb 1                 ; Negative number flag for parsenum
+dict_head:
+        .dw load_dict_head      ; Pointer to the latest entry in dict.
 
         ;; Main program
         .org 0x200
@@ -27,72 +34,78 @@ dicth:  .dw ldicth              ; Dictionary head
         sep #FLAGM
         rep #FLAGX
         lda.b #$00
-        ldx.w #lbuf
+        ldx.w #linebuf
         jsl GET_STR
 
         ;; Initialize variables
         rep #FLAGM
         lda.w #-1
-        sta nlx                 ; nlx starts with -1.
+        sta after_word          ; after_word starts with -1.
         sep #FLAGM
         stz done                ; done starts with 0.
 
         ;; On each iteration of the loop, parse a space-separated word
         ;; or number.
-mainloop:
-        ldx nlx                 ; x gets next index to check.
+        .func parse_word
+        ldx after_word          ; x gets next index to check.
 
-skipspaces:                     ; Skip spaces until start of word.
+skip_spaces:                    ; Skip spaces until start of word.
         inx
-        lda lbuf,x
+        lda linebuf,x
         cmp.b #' '
-        beq skipspaces          ; If space, repeat
+        beq skip_spaces         ; If space, repeat
         cmp.b #'\r'
         beq end                 ; If eol, stop
-        stx lx                  ; lx gets index of start of word.
+        stx word                ; word gets index of start of word.
 
-grabword:                       ; Search for end of word (space or null)
+grab_word:                      ; Search for end of word (space or null)
         inx
-        lda lbuf,x
+        lda linebuf,x
         cmp.b #' '
         beq eval                ; If space, found the whole word
         cmp.b #'\r'
-        beq setdone             ; If eol, found the end of the line
-        bra grabword
+        beq set_done            ; If eol, found the end of the line
+        bra grab_word
 
-setdone:                        ; Set done flag
-        inc done
+set_done:                       ; Set done flag
+        lda.b #1
+        sta done
+        .endf
+
 eval:                           ; Evaluate meaning of word.
-        stz lbuf,x              ; mark end of word with 0.
-        stx nlx                 ; nlx gets next index to search.
+        stz linebuf,x           ; mark end of word with 0.
+        stx after_word          ; after_word gets next index to search.
 
         ;; Search dictionary for word.
-        ldx dicth               ; x is a pointer to dict entry
+        .scope
+        ldx dict_head           ; x points to the dict entry
 
         ;; Compare word to dict entry's word.
-searchloop:
+loop:
         ;; If dict entry's word is null, we're at the end of the
         ;; dictionary and didn't find a match.  Attempt to parse as a
         ;; number instead.
         lda 0,x
-        beq parsenum
+        beq parse_num
         stx tmp                 ; save dict entry pointer
-        ldy lx                  ; y is a pointer to word
-wordcmploop:
+        ldy word                ; y is a pointer to word
+
+        ;; Check if the dict entry matches the current word.
+test_entry:
         ;; On each iteration, compare current character in the word
         ;; with the corresponding character in the dict entry.  If not
         ;; equal, break (no match) and if equal and one character is
         ;; 0, break (match).  Else repeat.
-        lda lbuf,y              ; load current char in word
+        lda linebuf,y           ; load current char in word
         cmp 0,x                 ; compare with char in dict entry
-        bne wordcmpfail         ; break if not equal
+        bne nomatch             ; break if not equal
         lda 0,x                 ; load char in dict entry
-        beq searchsuccess       ; break if zero
+        beq match               ; break if zero
         inx
         iny
-        bra wordcmploop         ; repeat
+        bra test_entry          ; repeat
 
-wordcmpfail:
+nomatch:
         ;; The word didn't match the dictionary entry, so go to the
         ;; next one.
         rep #FLAGM
@@ -101,48 +114,53 @@ wordcmpfail:
         adc.w #-DICT_ENTRY_SIZE ; get pointer to next entry
         tax
         sep #FLAGM
-        bra searchloop
+        bra loop
 
-searchsuccess:
-        ;; We found a match.  Call subroutine.
+match:
+        ;; We found a match.  Call the subroutine.
         rep #FLAGM
         lda tmp                 ; load saved dict entry pointer
         clc
         adc.w #DICT_ENTRY_OFFSET_FUNC ; get to address of func field
         tax
         jsr (0,x)
+        .ends
 
 repeat:
         sep #FLAGM
         lda done
-        beq mainloop            ; if not done, repeat
+        beq parse_word          ; if not done, repeat
 
 end:
         brk
 
-parsenum:                       ; Parse and print parsed number.
-        ldy lx
-        lda lbuf,y
+        ;; Parse a number and push it on the stack.
+        .func parse_num
+
+        ldy word
+        lda linebuf,y
         cmp.b #'-'
-        beq parsenumsetnegflag
+        beq set_neg
         stz neg                 ; set neg to 0
         dey
 
-parsenumafternegcheck:
+after_neg_check:
         rep #FLAGM
         lda.w #0                ; a starts as 0
 
-parsenumloop:
+loop:
+        ;; Read the next digit, check if it's an ASCII digit, and add
+        ;; it to the number.
         sta tmp                 ; save current number
 
         iny
         sep #FLAGM
-        lda lbuf,y
-        beq parsenumfinish      ; end of number found
+        lda linebuf,y
+        beq finish              ; end of number found
         cmp.b #'0'
-        bcc parsenumerror
+        bcc error
         cmp.b #'9'+1
-        bcs parsenumerror       ; bounds checking on digit
+        bcs error               ; bounds checking on digit
 
         rep #FLAGM
         lda tmp                 ; load current number
@@ -155,24 +173,26 @@ parsenumloop:
         sta tmp                 ; save num*10
 
         sep #FLAGM
-        lda lbuf,y              ; load ascii digit
+        lda linebuf,y           ; load ascii digit
         rep #FLAGM
         and.w #0x00ff & ~'0'    ; convert ascii digit to integer
         adc tmp                 ; add num*10 to new digit
 
-        bra parsenumloop        ; go to next digit
+        bra loop                ; go to next digit
 
-parsenumfinish:                 ; Negate parsed number (in tmp) if neg
+finish:
+        ;; If neg is set, negate the parsed number.  The parsed number
+        ;; will be stored in tmp.
         lda neg
         rep #FLAGM
-        beq parsenumpush
+        beq push
 
         lda.w #0
         sec
         sbc tmp
         sta tmp                 ; negate tmp and store in tmp
 
-parsenumpush:
+push:
         ;; Push the parsed number on the stack.
         lda sp
         sec
@@ -183,30 +203,34 @@ parsenumpush:
 
         bra repeat
 
-parsenumsetnegflag:
+set_neg:
+        ;; Set the neg flag.
         lda.b #1
         sta neg
-        bra parsenumafternegcheck
+        bra after_neg_check
 
-parsenumerror:
+error:
+        ;; Print parse_num_err_msg.
         lda.b #0
-        ldx.w #numerrm
-        jsl PUT_STR             ; print numerrm message
+        ldx.w #parse_num_err_msg
+        jsl PUT_STR
 
         jmp repeat
+        .endf
 
         ;; Other data
-lbuf:   .resb 0x100             ; Line buffer
-stack:  .resb 0x100             ; Data stack
+linebuf:
+        .resb 0x100             ; Line buffer
+stack:
+        .resb 0x100             ; Data stack
 
         ;; Dictionary
 
         ;; Each entry is formatted as a 0x20 byte name field followed
         ;; by a 2-byte field for the code address.  The entries are
         ;; laid out sequentially, and the address of the latest entry
-        ;; is stored at dicth.  ldicth ("load-time dictionary head")
-        ;; is the latest entry in the dictionary at load time/compile
-        ;; time.
+        ;; is stored at dict_head.  load_dict_head is the latest entry
+        ;; in the dictionary at load time/compile time.
         .set DICT_ENTRY_SIZE=0x22
         .set DICT_ENTRY_OFFSET_FUNC=0x20
 
@@ -224,7 +248,8 @@ entry:  .asciiz name
 
         ENTRY("+", add)
         ENTRY("-", subtract)
-ldicth: ENTRY(".", print_num)
+load_dict_head:
+        ENTRY(".", print_num)
 
         ;; Subroutines for each Forth word.  Each subroutine is called
         ;; with JSR and returns with RTS.
@@ -291,4 +316,5 @@ subtract:
         rts
 
         ;; Strings
-numerrm:.asciiz "Error parsing number"
+parse_num_err_msg:
+        .asciiz "Error parsing number"
