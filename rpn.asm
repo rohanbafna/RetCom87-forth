@@ -82,7 +82,7 @@ eval:                           ; Evaluate meaning of word.
 
         ;; Compare word to dict entry's word.
 loop:
-        ;; If dict entry's word is null, we're at the end of the
+        ;; If dict entry's word is empty, we're at the end of the
         ;; dictionary and didn't find a match.  Attempt to parse as a
         ;; number instead.
         lda 0,x
@@ -249,8 +249,7 @@ print_num:
 add:
         ;; Pops two numbers off the stack, adds them, and pushes the
         ;; result onto the stack.
-        rep #FLAGM
-        rep #FLAGX
+        rep #FLAGM | FLAGX
 
         lda (sp)                ; Get first number
         ldy.w #2
@@ -268,8 +267,7 @@ add:
 subtract:
         ;; Pops two numbers off the stack, subtracts them, and pushes
         ;; the result onto the stack.
-        rep #FLAGM
-        rep #FLAGX
+        rep #FLAGM | FLAGX
 
         ldy.w #2
         lda (sp),y              ; Get second number
