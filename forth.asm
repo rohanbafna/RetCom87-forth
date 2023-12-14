@@ -214,6 +214,88 @@ _return rts
 
 
 ;;; --------------------------------
+;;;    RETURN STACK MANIPULATION
+;;; --------------------------------
+
+;;; 2>R ( S: x1 x2 -- ) ( R: -- x1 x2 )
+        .entry two_to_r, "2>R"
+        ply                     ; pull return address
+        lda 2,x                 ; a = x1
+        pha
+        lda 0,x                 ; a = x2
+        pha
+        phy                     ; push return address back
+        inx
+        inx
+        inx
+        inx
+        rts
+
+
+;;; 2R> ( S: -- x1 x2 ) ( R: x1 x2 -- )
+        .entry two_r_from, "2R>"
+        dex
+        dex
+        dex
+        dex
+        ply                     ; pull return address
+        pla
+        sta 0,x
+        pla
+        sta 2,x
+        phy                     ; push return address back
+        rts
+
+
+;;; 2R@ ( S: -- x1 x2 ) ( R: x1 x2 -- x1 x2 )
+        .entry two_r_fetch, "2R@"
+        dex
+        dex
+        dex
+        dex
+        lda 5,s                 ; a = x2
+        sta 2,x
+        lda 3,s                 ; a = x1
+        sta 0,x
+        rts
+
+
+;;; >R ( S: x -- ) ( R: -- x ) Pop the top item from the data stack
+;;; and place it on the return stack.
+        .entry to_r, ">R"
+        ply                     ; pull return address
+        lda 0,x
+        inx
+        inx                     ; pop x from data stack
+        pha                     ; place x on return stack
+        phy                     ; push return address back
+        rts                     ; return
+
+
+;;; R> ( S: -- x ) ( R: x -- ) Remove the top item from the return
+;;; stack and place it on the data stack.
+        .entry r_from, "R>"
+        pla                     ; pull return address
+        ply                     ; pull x
+        dex
+        dex
+        sty 0,x                 ; push x to data stack
+        pha                     ; push return address back
+        rts                     ; return
+
+
+;;; R@ ( S: -- x ) ( R: x -- x ) Place a copy of the item on top of
+;;; the return stack onto the data stack.
+        .entry r_fetch, "R@"
+        lda 3,s                 ; load x
+        dex
+        dex
+        sta 0,x                 ; push x to data stack
+        rts
+
+
+
+;;; --------------------------------
 ;;;         UNSORTED WORDS
 ;;; --------------------------------
 
@@ -1086,28 +1168,6 @@ _fin    stx n_tib
         rts
 
 
-;;; R@ ( S: -- x ) ( R: x -- x ) Place a copy of the item on top of
-;;; the return stack onto the data stack.
-        .entry r_fetch, "R@"
-        lda 3,s                 ; load x
-        dex
-        dex
-        sta 0,x                 ; push x to data stack
-        rts
-
-
-;;; R> ( S: -- x ) ( R: x -- ) Remove the top item from the return
-;;; stack and place it on the data stack.
-        .entry r_from, "R>"
-        pla                     ; pull return address
-        ply                     ; pull x
-        dex
-        dex
-        sty 0,x                 ; push x to data stack
-        pha                     ; push return address back
-        rts                     ; return
-
-
 ;;; ] ( -- ) Enter compilation state.
         .entry right_bracket, "]"
         jsr lit.body
@@ -1245,61 +1305,6 @@ _val    .word 0
         clc
         adc #4
         tax
-        rts
-
-
-;;; >R ( S: x -- ) ( R: -- x ) Pop the top item from the data stack
-;;; and place it on the return stack.
-        .entry to_r, ">R"
-        ply                     ; pull return address
-        lda 0,x
-        inx
-        inx                     ; pop x from data stack
-        pha                     ; place x on return stack
-        phy                     ; push return address back
-        rts                     ; return
-
-
-;;; 2R@ ( S: -- x1 x2 ) ( R: x1 x2 -- x1 x2 )
-        .entry two_r_fetch, "2R@"
-        dex
-        dex
-        dex
-        dex
-        lda 5,s                 ; a = x2
-        sta 2,x
-        lda 3,s                 ; a = x1
-        sta 0,x
-        rts
-
-
-;;; 2R> ( S: -- x1 x2 ) ( R: x1 x2 -- )
-        .entry two_r_from, "2R>"
-        dex
-        dex
-        dex
-        dex
-        ply                     ; pull return address
-        pla
-        sta 0,x
-        pla
-        sta 2,x
-        phy                     ; push return address back
-        rts
-
-
-;;; 2>R ( S: x1 x2 -- ) ( R: -- x1 x2 )
-        .entry two_to_r, "2>R"
-        ply                     ; pull return address
-        lda 2,x                 ; a = x1
-        pha
-        lda 0,x                 ; a = x2
-        pha
-        phy                     ; push return address back
-        inx
-        inx
-        inx
-        inx
         rts
 
 
