@@ -222,18 +222,19 @@ entry:  .asciiz name
         .db 0
         .resb DICT_ENTRY_SIZE-1
 
+        ENTRY("+", add)
+        ENTRY("-", subtract)
 ldicth: ENTRY(".", print_num)
 
         ;; Subroutines for each Forth word.  Each subroutine is called
         ;; with JSR and returns with RTS.
 
 print_num:
-        ;; Pops the first number off the stack and prints it to the
-        ;; monitor.
+        ;; Pops a number off the stack and prints it to the monitor.
         sep #FLAGM
         rep #FLAGX
 
-        ldy #1
+        ldy.w #1
         lda (sp),y
         jsl SEND_HEX_OUT        ; print msb
         dey
@@ -248,6 +249,44 @@ print_num:
         clc
         adc.w #2
         sta sp
+
+        rts
+
+add:
+        ;; Pops two numbers off the stack, adds them, and pushes the
+        ;; result onto the stack.
+        rep #FLAGM
+        rep #FLAGX
+
+        lda (sp)                ; Get first number
+        ldy.w #2
+        clc
+        adc (sp),y              ; Add second number
+        sta (sp),y              ; Store back on stack
+
+        lda sp
+        clc
+        adc.w #2
+        sta sp                  ; Increase sp by 2
+
+        rts
+
+subtract:
+        ;; Pops two numbers off the stack, subtracts them, and pushes
+        ;; the result onto the stack.
+        rep #FLAGM
+        rep #FLAGX
+
+        ldy.w #2
+        lda (sp),y              ; Get second number
+        sec
+        sbc (sp)                ; Subtract first number
+        sta (sp),y              ; Store back on stack
+
+        lda sp
+        clc
+        adc.w #2
+        sta sp                  ; Increase sp by 2
 
         rts
 
