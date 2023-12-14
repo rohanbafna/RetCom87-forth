@@ -118,12 +118,8 @@ nomatch:
 
 match:
         ;; We found a match.  Call the subroutine.
-        rep #FLAGM
-        lda tmp                 ; load saved dict entry pointer
-        clc
-        adc.w #DICT_ENTRY_OFFSET_FUNC ; get to address of func field
-        tax
-        jsr (0,x)
+        ldx tmp                 ; load saved dict entry pointer
+        jsr (DICT_ENTRY_OFFSET_FUNC,x)
         .ends
 
 repeat:
