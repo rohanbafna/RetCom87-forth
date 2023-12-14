@@ -35,13 +35,13 @@ tmp                             ; Temporary storage
 
         ;; Each entry is formatted as a variable-length name field (as
         ;; a counted string) followed by a 2-byte field for the link,
-        ;; a 2-byte field for the code pointer, and the data field.
-        ;; The entries are laid out sequentially, and the address of
-        ;; the latest entry is stored at dict_head.  load_dict_head is
-        ;; the latest entry in the dictionary at load time/compile
-        ;; time.  Each subroutine is called with JSR and returns with
-        ;; RTS, and should be called with and return with FLAGM and
-        ;; FLAGX reset.  The parameter stack pointer is stored in X.
+        ;; followed by the executable code and/or data field.  The
+        ;; entries are laid out sequentially, and the address of the
+        ;; latest entry is stored at dict_head.  load_dict_head is the
+        ;; latest entry in the dictionary at load time/compile time.
+        ;; Each subroutine is called with JSR and returns with RTS,
+        ;; and should be called with and return with FLAGM and FLAGX
+        ;; reset.  The parameter stack pointer is stored in X.
 
 last_entry := 0
 
