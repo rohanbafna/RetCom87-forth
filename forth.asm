@@ -1032,7 +1032,8 @@ _nomatch
         ;;    BEGIN
         ;;       >R 2DUP R@   ( word len word len entry R: entry )
         ;;       MATCHES?  IF   ( word len R: entry )
-        ;;          2DROP R> >BODY -1 EXIT   ( xt -1 )
+        ;;          2DROP R> >BODY   ( xt )
+        ;;          DUP NOT-IMMEDIATE? 2* 1+ EXIT   ( xt -1 | xt 1 )
         ;;       THEN   ( word len R: entry )
         ;;       R> PREV-ENTRY DUP 0=   ( word len prev flag )
         ;;    UNTIL ;   ( word len 0 )
@@ -1048,8 +1049,10 @@ _begin  jsr to_r.body
         jsr two_drop.body
         jsr r_from.body
         jsr to_body.body
-        jsr lit.body
-        .sint -1
+        jsr dup.body
+        jsr not_immediate_question.body
+        jsr two_star.body
+        jsr one_plus.body
         rts
 _then   jsr r_from.body
         jsr prev_entry.body
@@ -1057,6 +1060,18 @@ _then   jsr r_from.body
         jsr zero_equal.body
         jsr zero_branch.body
         .word _begin
+        rts
+
+
+;;; NOT-IMMEDIATE? ( addr -- flag ) Return 0 if the dictionary entry
+;;; given by addr is immediate or -1 otherwise.
+        ;; : NOT-IMMEDIATE?   C@ PRECEDENCE AND 0<> ;
+        .entry not_immediate_question, "NOT-IMMEDIATE?"
+        jsr c_fetch.body
+        jsr lit.body
+        .word precedence
+        jsr and_.body
+        jsr zero_not_equal.body
         rts
 
 
@@ -1139,28 +1154,25 @@ _then   rts
 
 
 ;;; INTERPRET ( -- ? ) Interpret or compile a line of code.
-        ;; BEGIN  BL WORD DUP COUNT  WHILE
-        ;;    DROP FIND ?DUP  IF
+        ;; BEGIN  PARSE-NAME ?DUP  WHILE
+        ;;    FIND-NAME ?DUP  IF
         ;;       STATE @  IF
         ;;          0>  IF  EXECUTE  ELSE  COMPILE,  THEN
         ;;       ELSE
         ;;          DROP EXECUTE
         ;;       THEN
         ;;    ELSE
-        ;;       COUNT NUMBER
+        ;;       NUMBER
         ;;       STATE @  IF  LITERAL  THEN
         ;;    THEN
         ;; AGAIN
-        ;; DROP DROP ;
+        ;; DROP ;
         .entry interpret, "INTERPRET"
-_loop   jsr bl.body
-        jsr word.body
-        jsr dup.body
-        jsr count.body
+_loop   jsr parse_name.body
+        jsr question_dup.body
         jsr zero_branch.body
         .word _end
-        jsr drop.body
-        jsr find.body
+        jsr find_name.body
         jsr question_dup.body
         jsr zero_branch.body
         .word _else1
@@ -1178,8 +1190,7 @@ _then3  jmp _then2
 _else2  jsr drop.body
         jsr execute.body
 _then2  jmp _then1
-_else1  jsr count.body
-        jsr number.body
+_else1  jsr number.body
         jsr state.body
         jsr fetch.body
         jsr zero_branch.body
@@ -1188,7 +1199,6 @@ _else1  jsr count.body
 _then4
 _then1  jmp _loop
 _end    jsr drop.body
-        jsr drop.body
         rts
 
 
