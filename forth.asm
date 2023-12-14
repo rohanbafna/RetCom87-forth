@@ -11,17 +11,18 @@ precedence = $80                ; precedence bit bitmask
 smudge  = $40                   ; smudge bit bitmask
 noctrl  = $1F                   ; no control bits bitmask
 kbbuf   = $0200                 ; keyboard scancode buffer
+kblshf  = $01                   ; left shift modifier
 
 ;;; Direct page variables
 *       = $C0
 cp_v    .word ?                 ; Pointer to the next cell in dict
 toin_v  .word ?                 ; Current offset into TIB.
-kbstate .byte 0                 ; Current state of keyboard handler
-kbwoff  .byte 0                 ; Write offset of keyboard circular
+kbstate .byte ?                 ; Current state of keyboard handler
+kbwoff  .byte ?                 ; Write offset of keyboard circular
                                 ; buffer
-kbroff  .byte 0                 ; Read offset of keyboard circular
+kbroff  .byte ?                 ; Read offset of keyboard circular
                                 ; buffer
-kbpar   .byte 0                 ; Keyboard parity store
+kbpar   .byte ?                 ; Keyboard parity store
 tmp                             ; Temporary storage
 
 ;;; Register keyboard interrupt handler
@@ -51,10 +52,16 @@ tmp                             ; Temporary storage
         ;; Set STATE to interpretation.
         jsr left_bracket.body
 
-        ;; Enable keyboard interrupt by setting BCR6 to 1 and BCR5 to
-        ;; 0.
+        ;; Clear keyboard state.
         sep #FLAGM
         .as
+        stz kbroff
+        stz kbwoff
+        stz kbpar
+        stz kbstate
+
+        ;; Enable keyboard interrupt by setting BCR6 to 1 and BCR5 to
+        ;; 0.
         lda BCR
         ora #BCR6
         and #~BCR5
@@ -73,7 +80,14 @@ tmp                             ; Temporary storage
         jmp quit.body
 
 ;;; Keyboard interrupt handler
-kbint   phx
+        ;; Both X and Y *must* be saved because we are going to enter
+        ;; 8-bit index mode, so if we don't save these two registers
+        ;; and this interrupt was called while X was unset (i.e. most
+        ;; of the time) then the upper bytes of X and Y would be lost.
+        ;; I didn't save Y originally when I wrote this and it caused
+        ;; lots of strange bugs!
+kbint   phy
+        phx
         pha
         php
 
@@ -97,11 +111,11 @@ _start  bne _error              ; if bit read is not 0, error
         ;; Data bit: shifts bit read into current byte in buffer.
 _data   beq _noflip             ; if data bit is 1, flip parity
         inc kbpar
-_noflip phx
+_noflip txy
         ldx kbwoff              ; load write offset into X
         adc #-$04               ; C set iff data bit is 1
         ror kbbuf,x             ; rotate data bit into current byte
-        plx
+        tyx
         bra _next
 
         ;; Parity bit: errors if parity bit does not match expected
@@ -124,6 +138,7 @@ _next   inx
 _ret    plp
         pla
         plx
+        ply
         rti
 
         ;; Stop bit: errors if bit is not 1, otherwise finishes
@@ -1243,6 +1258,127 @@ _newev  lda kbbuf,y             ; A gets the latest key event
         rts
 
 
+;;; KEYMOD ( -- addr ) Returns the address of a cell containing the
+;;; current modifier bits for the keyboard.  (Only left-shift is used
+;;; right now.)
+        .entry keymod, "KEYMOD"
+        jsr lit.body
+        .word _val
+        rts
+_val    .word 0
+
+
+;;; PS2KEY ( -- char ) Wait for PS/2 keyboard input and return the
+;;; character corresponding to the key pressed.
+        ;; : PS2KEY
+        ;;    BEGIN
+        ;;       EKEY
+        ;;       \ if shift, set modifier bit
+        ;;       DUP $12 =  IF  KEYMOD @ 1 OR KEYMOD ! DROP 0  THEN
+        ;;       \ if F0 (release), read next scancode and unset
+        ;;       \ modifier bit or ignore
+        ;;       DUP $F0 =  IF
+        ;;          DROP EKEY $12 =  IF  KEYMOD @ $FE AND KEYMOD !  THEN 0
+        ;;       THEN
+        ;;       KEYMOD @ 1 AND  IF  SSCODE  ELSE  SCODE  THEN  + C@ ?DUP
+        ;;    UNTIL ;
+        .entry pstwo_key, "PS2KEY"
+_begin  jsr ekey.body
+        jsr dup.body
+        jsr lit.body
+        .word $12
+        jsr equal.body
+        jsr zero_branch.body
+        .word _then1
+        jsr keymod.body
+        jsr fetch.body
+        jsr lit.body
+        .sint 1
+        jsr or.body
+        jsr keymod.body
+        jsr store.body
+        jsr drop.body
+        jsr lit.body
+        .word 0
+_then1  jsr dup.body
+        jsr lit.body
+        .word $F0
+        jsr equal.body
+        jsr zero_branch.body
+        .word _then2
+        jsr drop.body
+        jsr ekey.body
+        jsr lit.body
+        .word $12
+        jsr equal.body
+        jsr zero_branch.body
+        .word _then3
+        jsr keymod.body
+        jsr fetch.body
+        jsr lit.body
+        .word $FE
+        jsr and_.body
+        jsr keymod.body
+        jsr store.body
+_then3  jsr lit.body
+        .sint 0
+_then2  jsr keymod.body
+        jsr fetch.body
+        jsr lit.body
+        .word 1
+        jsr and_.body
+        jsr zero_branch.body
+        .word _else4
+        jsr lit.body
+        .word _sscode
+        jmp _then4
+_else4  jsr lit.body
+        .word _scode
+_then4  jsr plus.body
+        jsr c_fetch.body
+        jsr question_dup.body
+        jsr zero_branch.body
+        .word _begin
+        rts
+
+        ;; Table mapping PS/2 scancodes to ASCII.  0 indicates an
+        ;; unmapped key.
+        ;;     0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
+_scode  .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$09,'`',$00 ; 0
+        .byte $00,$00,$00,$00,$00,'q','1',$00,$00,$00,'z','s','a','w','2',$00 ; 1
+        .byte $00,'c','x','d','e','4','3',$00,$00,' ','v','f','t','r','5',$00 ; 2
+        .byte $00,'n','b','h','g','y','6',$00,$00,$00,'m','j','u','7','8',$00 ; 3
+        .byte $00,',','k','i','o','0','9',$00,$00,'.','/','l',';','p','-',$00 ; 4
+        .byte $00,$00,$27,$00,'[','=',$00,$00,$00,$00,$0D,']',$00,'\',$00,$00 ; 5
+        .byte $00,$00,$00,$00,$00,$00,$08,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; 6
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,'-','*',$00,$00,$00 ; 7
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; 8
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; 9
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; A
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; B
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; C
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; D
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; E
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; F
+        ;; Equivalent table for Shift
+        ;;     0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
+_sscode .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$09,'~',$00 ; 0
+        .byte $00,$00,$00,$00,$00,'Q','!',$00,$00,$00,'Z','S','A','W','@',$00 ; 1
+        .byte $00,'C','X','D','E','$','#',$00,$00,' ','V','F','T','R','5',$00 ; 2
+        .byte $00,'N','B','H','G','Y','^',$00,$00,$00,'M','J','U','&','*',$00 ; 3
+        .byte $00,'<','K','I','O',')','(',$00,$00,'>','?','L',':','P','_',$00 ; 4
+        .byte $00,$00,'"',$00,'{','+',$00,$00,$00,$00,$0D,'}',$00,'|',$00,$00 ; 5"
+        .byte $00,$00,$00,$00,$00,$00,$08,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; 6
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,'-','*',$00,$00,$00 ; 7
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; 8
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; 9
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; A
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; B
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; C
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; D
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; E
+        .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ; F
+
 ;;; REFILL ( -- ) Get a line of characters and store it in the TIB,
 ;;; then set >IN to 0.
         ;; : REFILL
@@ -1259,7 +1395,7 @@ _newev  lda kbbuf,y             ; A gets the latest key event
         jsr lit.body
         .word tib
         jsr dup.body
-_begin  jsr key.body
+_begin  jsr pstwo_key.body
         jsr dup.body
         jsr lit.body
         .sint 13
