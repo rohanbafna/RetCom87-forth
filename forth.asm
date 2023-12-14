@@ -3,10 +3,13 @@
         .cpu "65816"
         .include "header.asm"
 
-;;; Memory locations
-tib      = $4000
-init_rsp = $5FFF
-init_psp = tib
+;;; Constants
+tib      = $4000                ; location of terminal input buffer
+init_rsp = $5FFF                ; initial return stack pointer
+init_psp = tib                  ; initial parameter stack pointer
+precedence = $80                ; precedence bit bitmask
+smudge  = $40                   ; smudge bit bitmask
+noctrl  = $1F                   ; no control bits bitmask
 
 ;;; Direct page variables
 *       = $C0
@@ -42,8 +45,8 @@ tmp                             ; Temporary storage
 
 last_entry := 0
 
-entry   .segment name, word
-\name   .ptext \word
+entry   .segment name, word, immediate=false
+\name   .text len (\word) | (\immediate*precedence), \word
         .word last_entry
 last_entry := \name
 \name.body
@@ -275,10 +278,21 @@ _wp     = tmp+6                 ; Word pointer
 
         ;; Compare word to dict entry's word.
 _loop
-        ldy #0                  ; Y indexes to the start of word
         stx _ep                 ; Save dict entry pointer
 
-        ;; Check if the dict entry matches the current word.
+        ;; Compare count bytes (we need to mask out the control bits).
+        lda 0,x                 ; load count byte from entry
+        bit #smudge             ; test smudge bit
+        bne _nomatch            ; if smudge bit set, ignore entry
+        and #noctrl             ; ignore control bits
+        cmp (_wp)               ; compare with count from word
+        bne _nomatch            ; break if not equal (no match)
+        inx                     ; go to next char in dict entry
+
+        ldy #1                  ; Y indexes to the start of word, past
+                                ; count byte
+
+        ;; Check if the dict entry name matches the current word.
 _test_entry
         ;; On each iteration, compare current character in the word
         ;; with the corresponding character in the dict entry.  If not
@@ -316,7 +330,7 @@ _nomatch
         rep #FLAGM
         .al
         lda (_ep)               ; a gets count byte of entry
-        and #$FF                ; clear high byte
+        and #noctrl             ; clear high byte and control bits
         inc a                   ; account for count byte
         tay                     ; y gets count
         lda (_ep),y             ; a gets dict-entry at offset count
