@@ -1106,7 +1106,8 @@ dict_head .word 0
         ;;    BEGIN   ( tib addr )
         ;;       KEY DUP 13 <>   ( tib addr char flag )
         ;;    WHILE   ( tib addr char )
-        ;;       DUP EMIT OVER ! 1+   ( tib addr' )
+        ;;       DUP EMIT DUP 8 =   ( tib addr char flag )
+        ;;       IF  DROP 1-  ELSE  OVER ! 1+  THEN   ( tib addr' )
         ;;    REPEAT   ( tib addr char )
         ;;    DROP OVER - (SOURCE) 2! ( )
         ;;    0 >IN ! ;
@@ -1123,10 +1124,19 @@ _begin  jsr key.body
         .word _end
         jsr dup.body
         jsr emit.body
-        jsr over.body
+        jsr dup.body
+        jsr lit.body
+        .sint 8
+        jsr equal.body
+        jsr zero_branch.body
+        .word _else
+        jsr drop.body
+        jsr one_minus.body
+        jmp _then
+_else   jsr over.body
         jsr store.body
         jsr one_plus.body
-        jmp _begin
+_then   jmp _begin
 _end    jsr drop.body
         jsr over.body
         jsr minus.body
