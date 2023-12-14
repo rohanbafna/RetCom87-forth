@@ -254,9 +254,10 @@ _end    rts
         rts
 
 
-;;; FIND ( c-addr -- c-addr 0 | xt -1 ) Find the definition
+;;; FIND ( c-addr -- c-addr 0 | xt 1 | xt -1 ) Find the definition
 ;;; corresponding to the c-addr word and either return c-addr and zero
-;;; (if not found) or xt and -1 (if found).
+;;; (if not found), xt and 1 (if found and immediate), or xt and -1
+;;; (if found and not immediate).
         .entry find, "FIND"
 _count  = tmp                   ; Count of characters to compare
 _sp     = tmp+2                 ; Saved stack pointer
@@ -314,10 +315,14 @@ _match
         ldx _sp                 ; restore sp to x
         sty 0,x                 ; replace c-addr with xt
 
+        ldy #1
+        lda (_ep)               ; check count byte of array
+        bit #precedence         ; check precedence flag
+        bne _imm                ; if set, push 1 instead of -1
+        ldy #-1                 ; set y to -1
+_imm    dex
         dex
-        dex
-        ldy #-1
-        sty 0,x                 ; push -1 to stack
+        sty 0,x                 ; push 1 or -1 to stack
 
         rep #FLAGM
         .al
