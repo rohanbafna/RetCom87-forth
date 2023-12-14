@@ -1494,27 +1494,35 @@ _finish
 
 ;;; : <name> ( -- ) Create a colon definition and enter compilation
 ;;; state.
-        ;; \ Create definition stub.
-        ;; BL WORD COUNT DUP smudge OR C, CP +! \ name field
-        ;; LATEST @ , \ link field
-        ;; 1- LATEST ! \ update latest with address of new word
-        ;; \ Enter compilation mode.
-        ;; ]
+        ;; : :
+        ;;    HERE   ( old-cp )
+        ;;    PARSE-NAME ( old-cp word len )
+        ;;    \ Create definition stub.
+        ;;    DUP smudge OR C,   \ count byte ( old-cp word len )
+        ;;    >R HERE R@ CMOVE   \ name field ( old-cp R: len )
+        ;;    R> CP +!   \ move cp forwards to account for name ( old-cp )
+        ;;    LATEST @ , \ link field ( old-cp )
+        ;;    LATEST ! \ update latest with address of new word ( )
+        ;;    \ Enter compilation mode.
+        ;;    ] ;   ( )
         .entry colon, ":"
-        jsr bl.body
-        jsr word.body
-        jsr count.body
+        jsr here.body
+        jsr parse_name.body
         jsr dup.body
         jsr lit.body
         .word smudge
         jsr or.body
         jsr c_comma.body
+        jsr to_r.body
+        jsr here.body
+        jsr r_fetch.body
+        jsr cmove.body
+        jsr r_from.body
         jsr cp.body
         jsr plus_store.body
         jsr latest.body
         jsr fetch.body
         jsr comma.body
-        jsr one_minus.body
         jsr latest.body
         jsr store.body
         jsr right_bracket.body
