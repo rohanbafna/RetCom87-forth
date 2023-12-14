@@ -51,6 +51,7 @@ last_entry := \name
         .endsegment
 
 
+
 ;;; --------------------------------
 ;;;     DATA STACK MANIPULATION
 ;;; --------------------------------
@@ -294,6 +295,51 @@ _return rts
         rts
 
 
+;;; --------------------------------
+;;;     PROGRAMMER CONVENIENCES
+;;; --------------------------------
+
+;;; .S ( -- ) Display the stack, for debugging purposes.
+        .entry dot_s, ".S"
+        ;; Print number of entries on stack.
+        jsr lit.body
+        .word '<'
+        jsr emit.body
+        jsr bl.body
+        jsr emit.body
+        jsr depth.body
+        jsr dot.body
+        jsr lit.body
+        .word '>'
+        jsr emit.body
+        jsr bl.body
+        jsr emit.body
+        ;; Print individual entries on stack.
+        ldy #init_psp-2
+_loop   stx tmp
+        cpy tmp
+        blt _end                ; if y<sp, exit loop
+        lda 0,y                 ; get item y is pointing to
+        dex
+        dex
+        sta 0,x                 ; push it onto stack
+        phy
+        jsr dot.body            ; print cell
+        ply
+        dey
+        dey                     ; go to next item
+        bra _loop
+_end    rts
+
+
+;;; ? ( addr -- ) Fetch the contents of the given address and display
+;;; the result according to the current base.
+        .entry question, "?"
+        jsr fetch.body
+        jsr dot.body
+        rts
+
+
 
 ;;; --------------------------------
 ;;;         UNSORTED WORDS
@@ -527,39 +573,6 @@ _again
         jsr parse.body
         jsr type.body
         rts
-
-
-;;; .S ( -- ) Display the stack, for debugging purposes.
-        .entry dot_s, ".S"
-        ;; Print number of entries on stack.
-        jsr lit.body
-        .word '<'
-        jsr emit.body
-        jsr bl.body
-        jsr emit.body
-        jsr depth.body
-        jsr dot.body            ; print a
-        jsr lit.body
-        .word '>'
-        jsr emit.body
-        jsr bl.body
-        jsr emit.body
-        ;; Print individual entries on stack.
-        ldy #init_psp-2
-_loop   stx tmp
-        cpy tmp
-        blt _end                ; if y<sp, exit loop
-        lda 0,y                 ; get item y is pointing to
-        dex
-        dex
-        sta 0,x                 ; push it onto stack
-        phy
-        jsr dot.body            ; print cell
-        ply
-        dey
-        dey                     ; go to next item
-        bra _loop
-_end    rts
 
 
 ;;; EMIT ( char -- ) Prints out char to the screen.
