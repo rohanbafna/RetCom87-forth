@@ -10,15 +10,26 @@ init_psp = tib                  ; initial parameter stack pointer
 precedence = $80                ; precedence bit bitmask
 smudge  = $40                   ; smudge bit bitmask
 noctrl  = $1F                   ; no control bits bitmask
+kbbuf   = $0200                 ; keyboard scancode buffer
 
 ;;; Direct page variables
 *       = $C0
 cp_v    .word ?                 ; Pointer to the next cell in dict
 toin_v  .word ?                 ; Current offset into TIB.
+kbstate .byte 0                 ; Current state of keyboard handler
+kbwoff  .byte 0                 ; Write offset of keyboard circular
+                                ; buffer
+kbroff  .byte 0                 ; Read offset of keyboard circular
+                                ; buffer
+kbpar   .byte 0                 ; Keyboard parity store
 tmp                             ; Temporary storage
 
+;;; Register keyboard interrupt handler
+        * = $0104               ; Non maskable interrupt vector
+        jmp kbint
+
 ;;; Main program
-        * = $0200
+        * = $0300
 
         clc
         xce
@@ -40,6 +51,17 @@ tmp                             ; Temporary storage
         ;; Set STATE to interpretation.
         jsr left_bracket.body
 
+        ;; Enable keyboard interrupt by setting BCR6 to 1 and BCR5 to
+        ;; 0.
+        sep #FLAGM
+        .as
+        lda BCR
+        ora #BCR6
+        and #~BCR5
+        sta BCR
+        rep #FLAGM
+        .al
+
         ;; Load boot program.
         lda #boot_t
         sta s_addr
@@ -50,6 +72,91 @@ tmp                             ; Temporary storage
 
         jmp quit.body
 
+;;; Keyboard interrupt handler
+kbint   phx
+        pha
+        php
+
+        sep #FLAGM|FLAGX        ; 8-bit memory and index mode
+        .as
+        .xs
+
+        ldx kbstate             ; load current state into X
+        lda PD4                 ; load port 4 data into A
+        and #$04                ; data bit is bit 2
+
+        ;; Jump to handler depending on current state, with status
+        ;; register based on data bit.
+        jmp (_jtable,x)
+
+        ;; Start bit: checks that data bit is 0.  If so, advances the
+        ;; state; otherwise signals an error.
+_start  bne _error              ; if bit read is not 0, error
+        bra _next
+
+        ;; Data bit: shifts bit read into current byte in buffer.
+_data   beq _noflip             ; if data bit is 1, flip parity
+        inc kbpar
+_noflip phx
+        ldx kbwoff              ; load write offset into X
+        adc #-$04               ; C set iff data bit is 1
+        ror kbbuf,x             ; rotate data bit into current byte
+        plx
+        bra _next
+
+        ;; Parity bit: errors if parity bit does not match expected
+        ;; parity.
+_parity adc #-$04               ; C set iff parity bit is 1
+        lda kbpar
+        adc #0                  ; A = parity bit + kbpar
+        ;; The parity bit should be set iff an even number of data
+        ;; bits were set.  Thus, counting the parity bit, an odd
+        ;; number of bits should have been set, meaning that we expect
+        ;; the LSB of A to be 1.
+        bit #1                  ; test LSB of A
+        beq _error              ; if 0, error
+
+        ;; Go to the next bit and return.
+_next   inx
+        inx
+        stx kbstate             ; increment state by 2 since addresses
+                                ; are 2 bytes long
+_ret    plp
+        pla
+        plx
+        rti
+
+        ;; Stop bit: errors if bit is not 1, otherwise finishes
+        ;; writing the current byte.
+_stop   beq _error              ; if bit read is 0, discard packet
+        inc kbwoff
+        ;; Fall through to error since we need to clear the next byte
+        ;; and state anyways.
+
+        ;; On an error, discard current byte and reset state.
+_error  ldx kbwoff
+        stz kbbuf,x             ; discard current byte
+        stz kbstate             ; reset state
+        stz kbpar               ; reset parity
+        bra _ret                ; return from interrupt
+
+        ;; The jump table used to select the proper handler.
+_jtable .word _start
+        .word _data
+        .word _data
+        .word _data
+        .word _data
+        .word _data
+        .word _data
+        .word _data
+        .word _data
+        .word _parity
+        .word _stop
+
+        .al
+        .xl
+
+;;; Load boot string into memory, convert \n to ' '.
 boot    = binary("boot.fs")
 boot_t  .for i:=0, i<len(boot), i+=1
         .if boot[i]==10
@@ -1076,6 +1183,37 @@ dict_head .word 0
 ;;; --------------------------------
 ;;;              I/O
 ;;; --------------------------------
+
+;;; EKEY ( -- x ) Waits for a keyboard event.
+        .entry ekey, "EKEY"
+        stx tmp
+        sep #FLAGM|FLAGX
+        .as
+        .xs
+        ldy kbroff              ; Y gets the read offset
+
+        ;; If the write offset is not equal to the read offset, then
+        ;; there is a new key event to be read.
+_loop   cpy kbwoff
+        bne _newev
+        wai                     ; wait for interrupt
+        bra _loop
+
+        ;; Read the new key event.
+_newev  lda kbbuf,y             ; A gets the latest key event
+        iny
+        sty kbroff              ; Increment read offset
+
+        ;; Push the key event on the stack.
+        rep #FLAGM|FLAGX
+        .al
+        .xl
+        ldx tmp
+        dex
+        dex
+        and #$FF
+        sta 0,x
+        rts
 
 ;;; EMIT ( char -- ) Prints out char to the screen.
         .entry emit, "EMIT"
