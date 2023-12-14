@@ -30,15 +30,15 @@ neg:    .resb 1                 ; Negative number flag for parsenum
 
         ;; Initialize variables
         rep #FLAGM
-        stz nlx
-        dec nlx                 ; nlx starts with -1.
+        lda.w #-1
+        sta nlx                 ; nlx starts with -1.
         sep #FLAGM
         stz done                ; done starts with 0.
 
         ;; On each iteration of the loop, parse a space-separated word
         ;; or number.
 mainloop:
-        ldx.b nlx               ; x gets next index to check.
+        ldx nlx                 ; x gets next index to check.
 
 skipspaces:                     ; Skip spaces until start of word.
         inx
@@ -47,7 +47,7 @@ skipspaces:                     ; Skip spaces until start of word.
         beq skipspaces          ; If space, repeat
         cmp.b #'\r'
         beq end                 ; If eol, stop
-        stx.b lx                ; lx gets index of start of word.
+        stx lx                  ; lx gets index of start of word.
 
 grabword:                       ; Search for end of word (space or null)
         inx
@@ -62,16 +62,16 @@ setdone:                        ; Set done flag
         inc done
 eval:                           ; Evaluate meaning of word.
         stz lbuf,x              ; mark end of word with 0.
-        stx.b nlx               ; nlx gets next index to search.
+        stx nlx                 ; nlx gets next index to search.
 
-        ldy.b lx
+        ldy lx
         lda lbuf,y
         cmp.b #'!'              ; If first character is !, parse as a
         beq parsenum            ; number
 
         ;; Print parsed word.
         lda.b #0
-        ldx #wordm
+        ldx.w #wordm
         jsl PUT_STR             ; print wordm message
 
         rep #FLAGM
@@ -85,7 +85,7 @@ eval:                           ; Evaluate meaning of word.
 
 repeat:
         jsl SEND_CR             ; new line
-        lda.b done
+        lda done
         beq mainloop            ; if not done, repeat
 
 end:
@@ -104,7 +104,7 @@ parsenumafternegcheck:
         lda.w #0                ; a starts as 0
 
 parsenumloop:
-        sta.b tmp               ; save current number
+        sta tmp                 ; save current number
 
         iny
         sep #FLAGM
@@ -116,54 +116,54 @@ parsenumloop:
         bcs parsenumerror       ; bounds checking on digit
 
         rep #FLAGM
-        lda.b tmp               ; load current number
+        lda tmp                 ; load current number
         asl
-        sta.b tmp               ; tmp gets num*2
+        sta tmp                 ; tmp gets num*2
         asl
         asl                     ; a gets num*8
         clc
-        adc.b tmp               ; a gets num*10
-        sta.b tmp               ; save num*10
+        adc tmp                 ; a gets num*10
+        sta tmp                 ; save num*10
 
         sep #FLAGM
         lda lbuf,y              ; load ascii digit
         rep #FLAGM
         and.w #0x00ff & ~'0'    ; convert ascii digit to integer
-        adc.b tmp               ; add num*10 to new digit
+        adc tmp                 ; add num*10 to new digit
 
         bra parsenumloop        ; go to next digit
 
 parsenumfinish:                 ; Negate parsed number (in tmp) if neg
-        lda.b neg
+        lda neg
         beq parsenumprint
 
         rep #FLAGM
         lda.w #0
         sec
-        sbc.b tmp
-        sta.b tmp               ; negate tmp and store in tmp
+        sbc tmp
+        sta tmp                 ; negate tmp and store in tmp
         sep #FLAGM
 
 parsenumprint:                  ; Print the parsed number (in tmp)
         lda.b #0
-        ldx #numm
+        ldx.w #numm
         jsl PUT_STR             ; print numm message
 
-        lda.b tmp+1
+        lda tmp+1
         jsl SEND_HEX_OUT        ; print msb
-        lda.b tmp
+        lda tmp
         jsl SEND_HEX_OUT        ; print lsb
 
         bra repeat
 
 parsenumsetnegflag:
         lda.b #1
-        sta.b neg
+        sta neg
         bra parsenumafternegcheck
 
 parsenumerror:
         lda.b #0
-        ldx #numerrm
+        ldx.w #numerrm
         jsl PUT_STR             ; print numerrm message
 
         bra repeat
