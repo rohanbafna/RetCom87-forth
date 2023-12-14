@@ -1,14 +1,10 @@
-# Path to naken_asm executable
-NAKEN_ASM = naken_asm
+# Path to 64tass executable
+64TASS = 64tass
 
-programs = rpn
-
-all : $(programs:%=%.hex)
-
-%.hex : %.asm
-	naken_asm -I include -l $< -o $@
+forth.hex : forth.asm header.asm
+	64tass --intel-hex -o forth.hex -L forth.lst forth.asm
 
 clean :
-	rm -f $(programs:%=%.hex) $(programs:%=%.lst)
+	rm -f forth.hex forth.lst
 
 .PHONY : clean
