@@ -295,6 +295,16 @@ _return rts
         rts
 
 
+;;; UNLOOP ( -- ) ( R: x1 x2 -- ) Drops the top two items from the
+;;; return stack.
+        .entry unloop, "UNLOOP"
+        pla
+        ply
+        ply
+        pha
+        rts
+
+
 ;;; --------------------------------
 ;;;     PROGRAMMER CONVENIENCES
 ;;; --------------------------------
@@ -848,42 +858,49 @@ _less   lda #-1
         rts
 
 
+four    .text "four"
+four2   .text "four"
+five    .text "five"
+
+
 ;;; =STRING ( addr1 addr2 u -- flag ) Compare the two strings at addr1
 ;;; and addr2, both of length u, and return flag, which is true if the
 ;;; strings are equal and false if not
         .entry equal_string, "=STRING"
-_addr1  = tmp
-_addr2  = tmp+2
-_u      = tmp+4
-        ;; Populate _addr1, _addr2, and _u.
-        lda 4,x
-        sta _addr1
-        lda 2,x
-        sta _addr2
-        lda 0,x
-        sta _u
-        ;; Pop 2 items off stack (leave space for flag).
-        inx
-        inx
-        inx
-        inx
-        ;; Perform string comparison with u iterations
-        ldy #0                  ; y starts at 0
-_loop   cpy _u
-        beq _equal              ; if y = u, break
-        lda (_addr1),y          ; load char from string 1
-        cmp (_addr2),y          ; compare with char from string 2
-        bne _not_equal          ; if not equal, break
-        iny
-        bra _loop
-        ;; If fell out of loop, then strings are equal
-_equal  lda #-1
-        sta 0,x
+        ;; : =STRING
+        ;;    0 DO   ( addr1 addr2 ) ( R: u 0 )
+        ;;       2DUP C@ SWAP C@   ( addr1 addr2 c2 c1 )
+        ;;       <>  IF  2DROP 0 UNLOOP EXIT  THEN   ( addr1 addr2 )
+        ;;       1+ SWAP 1+   ( addr2' addr1' )
+        ;;    LOOP
+        ;;    2DROP -1 ;
+        jsr lit.body
+        .word 0
+_do     jsr two_to_r.body
+        jsr two_dup.body
+        jsr c_fetch.body
+        jsr swap.body
+        jsr c_fetch.body
+        jsr not_equal.body
+        jsr zero_branch.body
+        .word _then
+        jsr two_drop.body
+        jsr lit.body
+        .word 0
+        jsr unloop.body
         rts
-        ;; If discovered two characters were not equal, strings are
-        ;; not equal
-_not_equal
-        stz 0,x
+_then   jsr one_plus.body
+        jsr swap.body
+        jsr one_plus.body
+        jsr two_r_from.body
+        jsr one_plus.body
+        jsr loop_runtime.body
+        jsr zero_branch.body
+        .word _do
+        jsr two_drop.body
+        jsr two_drop.body
+        jsr lit.body
+        .sint -1
         rts
 
 
@@ -1546,15 +1563,12 @@ _true   lda #-1
         rts
 
 
-;;; (LOOP) ( x1 x2 -- flag x1 x2' ) Increment index x2.  Return true
+;;; (LOOP) ( x1 x2 -- x1 x2' flag ) Increment index x2.  Return true
 ;;; when x2 is equal to x1 (loop is ending).
         ;; : (LOOP)   1+ 2DUP = ;
         .entry loop_runtime, "(LOOP)"
-        jsr one_plus.body
         jsr two_dup.body
         jsr equal.body
-        jsr rot.body
-        jsr rot.body
         rts
 
 
@@ -1776,32 +1790,20 @@ _val    .word 0
 ;;; TYPE ( c-addr u -- ) If u is greater than zero, display the
 ;;; character string specified by c-addr and u.
         ;; : TYPE   0 ?DO  DUP C@ EMIT 1+  LOOP  DROP ;
-        ;; Expanded:
-        ;; : TYPE   0 2DUP =  IF
-        ;;       2DROP
-        ;;    ELSE
-        ;;       2>R (DO)  DUP C@ EMIT 1+  2R> (LOOP) 2>R (0BRANCH) 2R> 2DROP
-        ;;    THEN  DROP ;
         .entry type, "TYPE"
         jsr lit.body
         .word 0
-        jsr two_dup.body
-        jsr equal.body
-        jsr zero_branch.body
-        .word _else
-        jsr two_drop.body
-        jmp _end
-_else   jsr two_to_r.body
-_loop   jsr dup.body
+        jmp _loop
+_do     jsr two_to_r.body
+        jsr dup.body
         jsr c_fetch.body
         jsr emit.body
         jsr one_plus.body
         jsr two_r_from.body
-        jsr loop_runtime.body
-        jsr two_to_r.body
+        jsr one_plus.body
+_loop   jsr loop_runtime.body
         jsr zero_branch.body
-        .word _loop
-        jsr two_r_from.body
+        .word _do
         jsr two_drop.body
 _end    jsr drop.body
         rts
