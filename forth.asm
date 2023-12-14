@@ -273,6 +273,16 @@ _again
         rts
 
 
+;;; .( ( "ccc<paren>" -- ) Parse and display ccc delimited by ).
+        ;; : .(   $29 PARSE TYPE ;
+        .entry dot_paren, ".("
+        jsr lit.body
+        .word $29
+        jsr parse.body
+        jsr type.body
+        rts
+
+
 ;;; .S ( -- ) Display the stack, for debugging purposes.
         .entry dot_s, ".S"
         ;; Print number of entries on stack.
@@ -340,6 +350,20 @@ _end    rts
         .al
         inx
         inx                     ; pop char
+        rts
+
+
+;;; = ( x1 x2 -- flag ) flag is true when x1 is equal to x2.
+        .entry equal, "="
+        lda 0,x
+        inx
+        inx
+        cmp 0,x
+        beq _true
+        stz 0,x
+        rts
+_true   lda #-1
+        sta 0,x
         rts
 
 
@@ -586,6 +610,18 @@ _end    jsr drop.body
         rts
 
 
+;;; (LOOP) ( x1 x2 -- flag x1 x2' ) Increment index x2.  Return true
+;;; when x2 is equal to x1 (loop is ending).
+        ;; : (LOOP)   1+ 2DUP = ;
+        .entry loop_runtime, "(LOOP)"
+        jsr one_plus.body
+        jsr two_dup.body
+        jsr equal.body
+        jsr rot.body
+        jsr rot.body
+        rts
+
+
 ;;; - ( n1 n2 -- n3 ) Subtracts n2 from n1 to get n3.
         .entry minus, "-"
         lda 2,x                 ; a := n1
@@ -602,6 +638,29 @@ _end    jsr drop.body
         lda 0,x
         eor #$FFFF
         inc a
+        sta 0,x
+        rts
+
+
+;;; NIP ( x1 x2 -- x2 )
+        .entry nip, "NIP"
+        lda 0,x
+        sta 2,x
+        inx
+        inx
+        rts
+
+
+;;; <> ( x1 x2 -- flag ) flag is true when x1 is not equal to x2.
+        .entry not_equal, "<>"
+        lda 0,x
+        inx
+        inx
+        cmp 0,x
+        bne _true
+        stz 0,x
+        rts
+_true   lda #-1
         sta 0,x
         rts
 
@@ -707,6 +766,12 @@ _err_msg .null "Could not find word in dictionary"
         rts
 
 
+;;; 1+ ( n1 -- n2 ) n2 is n1 + 1.
+        .entry one_plus, "1+"
+        inc 0,x
+        rts
+
+
 ;;; OR ( x1 x2 -- x3 ) x3 is the bitwise inclusive or of x1 and x2.
         .entry or, "OR"
         lda 0,x
@@ -714,6 +779,64 @@ _err_msg .null "Could not find word in dictionary"
         sta 2,x
         inx
         inx
+        rts
+
+
+;;; OVER ( x1 x2 -- x1 x2 x1 )
+        .entry over, "OVER"
+        lda 2,x
+        dex
+        dex
+        sta 0,x
+        rts
+
+
+;;; PARSE <text> Parse a string up until the next occurrence of the
+;;; given delimiter and return the address and length.
+        ;; : PARSE  ( char -- addr n )
+        ;;    >R                \ save char to return stack
+        ;;    >IN @             \ start with current value of >IN
+        ;;    \ increment value on stack until delimeter found
+        ;;    BEGIN  DUP TIB + C@ R@ <>  WHILE  1+  REPEAT
+        ;;    R> DROP           \ no need for char now
+        ;;    DUP >IN @ - >R    \ save n on return stack
+        ;;    >IN @ TIB + >R    \ save addr on return stack
+        ;;    1+ >IN !          \ update >IN
+        ;;    R> R>             \ get n and addr from return stack
+        ;; ;
+        .entry parse, "PARSE"
+        jsr to_r.body
+        jsr toin.body
+        jsr fetch.body
+_begin  jsr dup.body
+        jsr lit.body
+        .word tib
+        jsr plus.body
+        jsr c_fetch.body
+        jsr r_fetch.body
+        jsr not_equal.body
+        jsr zero_branch.body
+        .word _after
+        jsr one_plus.body
+        jmp _begin
+_after  jsr r_from.body
+        jsr drop.body
+        jsr dup.body
+        jsr toin.body
+        jsr fetch.body
+        jsr minus.body
+        jsr to_r.body
+        jsr toin.body
+        jsr fetch.body
+        jsr lit.body
+        .word tib
+        jsr plus.body
+        jsr to_r.body
+        jsr one_plus.body
+        jsr toin.body
+        jsr store.body
+        jsr r_from.body
+        jsr r_from.body
         rts
 
 
@@ -851,12 +974,45 @@ _fin    stx n_tib
         rts
 
 
+;;; R@ ( S: -- x ) ( R: x -- x ) Place a copy of the item on top of
+;;; the return stack onto the data stack.
+        .entry r_fetch, "R@"
+        lda 3,s                 ; load x
+        dex
+        dex
+        sta 0,x                 ; push x to data stack
+        rts
+
+
+;;; R> ( S: -- x ) ( R: x -- ) Remove the top item from the return
+;;; stack and place it on the data stack.
+        .entry r_from, "R>"
+        pla                     ; pull return address
+        ply                     ; pull x
+        dex
+        dex
+        sty 0,x                 ; push x to data stack
+        pha                     ; push return address back
+        rts                     ; return
+
+
 ;;; ] ( -- ) Enter compilation state.
         .entry right_bracket, "]"
         jsr lit.body
         .sint -1
         jsr state.body
         jsr store.body
+        rts
+
+
+;;; ROT ( x1 x2 x3 -- x2 x3 x1 )
+        .entry rot, "ROT"
+        lda 4,x                 ; a = x1
+        ldy 0,x                 ; y = x3
+        sta 0,x
+        lda 2,x                 ; a = x2
+        sty 2,x
+        sta 4,x
         rts
 
 
@@ -1000,6 +1156,117 @@ _val    .word 0
         rts
 
 
+;;; >R ( S: x -- ) ( R: -- x ) Pop the top item from the data stack
+;;; and place it on the return stack.
+        .entry to_r, ">R"
+        ply                     ; pull return address
+        lda 0,x
+        inx
+        inx                     ; pop x from data stack
+        pha                     ; place x on return stack
+        phy                     ; push return address back
+        rts                     ; return
+
+
+;;; 2DROP ( x1 x2 -- )
+        .entry two_drop, "2DROP"
+        inx
+        inx
+        inx
+        inx
+        rts
+
+
+;;; 2DUP ( x1 x2 -- x1 x2 x1 x2 )
+        .entry two_dup, "2DUP"
+        lda 2,x                 ; a = x1
+        ldy 0,x                 ; y = x2
+        dex
+        dex
+        dex
+        dex
+        sta 2,x
+        sty 0,x
+        rts
+
+
+;;; 2R@ ( S: -- x1 x2 ) ( R: x1 x2 -- x1 x2 )
+        .entry two_r_fetch, "2R@"
+        dex
+        dex
+        dex
+        dex
+        lda 5,s                 ; a = x2
+        sta 2,x
+        lda 3,s                 ; a = x1
+        sta 0,x
+        rts
+
+
+;;; 2R> ( S: -- x1 x2 ) ( R: x1 x2 -- )
+        .entry two_r_from, "2R>"
+        dex
+        dex
+        dex
+        dex
+        ply                     ; pull return address
+        pla
+        sta 0,x
+        pla
+        sta 2,x
+        phy                     ; push return address back
+        rts
+
+
+;;; 2>R ( S: x1 x2 -- ) ( R: -- x1 x2 )
+        .entry two_to_r, "2>R"
+        ply                     ; pull return address
+        lda 2,x                 ; a = x1
+        pha
+        lda 0,x                 ; a = x2
+        pha
+        phy                     ; push return address back
+        inx
+        inx
+        inx
+        inx
+        rts
+
+
+;;; TYPE ( c-addr u -- ) If u is greater than zero, display the
+;;; character string specified by c-addr and u.
+        ;; : TYPE   0 ?DO  DUP C@ EMIT 1+  LOOP  DROP ;
+        ;; Expanded:
+        ;; : TYPE   0 2DUP =  IF
+        ;;       2DROP
+        ;;    ELSE
+        ;;       2>R (DO)  DUP C@ EMIT 1+  2R> (LOOP) 2>R (0BRANCH) 2R> 2DROP
+        ;;    THEN  DROP ;
+        .entry type, "TYPE"
+        jsr lit.body
+        .word 0
+        jsr two_dup.body
+        jsr equal.body
+        jsr zero_branch.body
+        .word _else
+        jsr two_drop.body
+        jmp _end
+_else   jsr two_to_r.body
+_loop   jsr dup.body
+        jsr c_fetch.body
+        jsr emit.body
+        jsr one_plus.body
+        jsr two_r_from.body
+        jsr loop_runtime.body
+        jsr two_to_r.body
+        jsr zero_branch.body
+        .word _loop
+        jsr two_r_from.body
+        jsr two_drop.body
+_end    jsr drop.body
+        rts
+
+
 ;;; TYPEN ( addr -- ) Type a null-terminated string to the terminal.
         .entry typen, "TYPEN"
         lda 0,x                 ; load addr to a
@@ -1018,7 +1285,7 @@ _val    .word 0
 
 
 ;;; >IN ( -- addr ) Return the address of a cell that contains the
-;;; >current offset into TIB.
+;;; current offset into TIB.
         .entry toin, ">IN"
         jsr lit.body
         .word toin_v
@@ -1061,6 +1328,7 @@ _grab_word
         lda TIB,x               ; Get next character
         cmp tmp+2               ; Compare with delimiter
         bne _grab_word          ; If delim, found whole word, else loop
+        inx                     ; Move past delim if present
 
         ;; Write the length of the word into the first char and
         ;; return.
@@ -1106,6 +1374,17 @@ _true   lda #-1
         .entry zero_greater_than, "0>"
         jsr negate.body
         jsr zero_less_than.body ; inefficient, but easy
+        rts
+
+
+;;; 0<> ( n -- flag ) Return true when n is not equal to 0.
+        .entry zero_not_equal, "0<>"
+        lda 0,x
+        bne _true
+        stz 0,x                 ; if n==0, flag = 0
+        rts
+_true   lda #-1
+        sta 0,x                 ; if n!=0, flag = -1
         rts
 
 
