@@ -465,6 +465,95 @@ _fin    stx n_tib
         rts
 
 
+;;; /MOD ( n1 n2 -- n3 n4 ) Divide n1 by n2, leaving the remainder n3
+;;; and quotient n4.
+        .entry slash_mod, "/MOD"
+_dividend = tmp
+_divisor = tmp+2
+_quotient = tmp+4
+_neg    = tmp+6                 ; negative flag (msb)
+
+        ldy #0                  ; holds negative flag
+        lda 2,x                 ; get dividend
+        sta _dividend           ; save dividend
+        bpl _dividend_pos       ; if positive, don't negate
+        eor #$FFFF
+        inc a
+        sta _dividend           ; save -dividend
+        tya
+        eor #$8000              ; toggle negative flag
+        tay
+_dividend_pos
+        lda 0,x                 ; get divisor
+        sta _divisor            ; save divisor
+        bpl _divisor_pos        ; if positive, don't negate
+        eor #$FFFF
+        inc a
+        sta _divisor            ; save -divisor
+        tya
+        eor #$8000              ; toggle negative flag
+        tay
+_divisor_pos
+        sty _neg                ; save negative flag
+
+        ;; Shift the divisor leftwards, storing the amount shifted in
+        ;; y.  Stop when divisor >= dividend (unsigned); since
+        ;; dividend is at maximum $80, a nonzero divisor will always
+        ;; be greater than or equal to it when shifted enough without
+        ;; losing information.
+        ldy #0                  ; number of shifts
+        lda _divisor
+_shift_loop
+        cmp _dividend
+        bge _end_shift          ; if divisor >= dividend, no need to
+                                ; shift more
+        asl a                   ; shift divisor left once
+        iny                     ; count the shifts
+        bra _shift_loop         ; try to shift again
+
+_end_shift
+        sta _divisor            ; save shifted divisor
+        stz _quotient           ; initialize quotient to 0
+
+        ;; Perform long division with y+1 places.
+_div_loop
+        lda _dividend           ; load current dividend
+        sec
+        sbc _divisor            ; subtract the shifted divisor, set
+                                ; carry bit if dividend >= divisor
+        php
+        rol _quotient           ; shift carry bit into quotient (1 if
+                                ; dividend >= divisor, 0 otherwise)
+        plp                     ; get carry bit from subtraction
+        blt _no_sub             ; if dividend<divisor, don't save the
+                                ; subtracted dividend
+        sta _dividend           ; save subtracted dividend
+_no_sub lsr _divisor            ; shift divisor right once
+        dey                     ; count shift
+        bpl _div_loop           ; if y is not negative, do another
+                                ; iteration
+
+        ;; Return quotient and remainder, negated if _neg is set.
+        lda _dividend           ; load remainder
+        bit _neg
+        bpl _no_neg_remainder   ; if _neg not set, don't negate
+                                ; remainder
+        eor #$FFFF
+        inc a                   ; negate remainder
+_no_neg_remainder
+        sta 2,x                 ; store in n3
+        lda _quotient           ; load quotient
+        bit _neg
+        bpl _no_neg_quotient    ; if _neg not set, don't negate
+                                ; quotient
+        eor #$FFFF
+        inc a                   ; negate quotient
+_no_neg_quotient
+        sta 0,x                 ; store in n4
+
+        rts
+
+
 ;;; TYPEN ( addr -- ) Type a null-terminated string to the terminal.
         .entry typen, "TYPEN"
         lda 0,x                 ; load addr to a
