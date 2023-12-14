@@ -293,6 +293,17 @@ _end    jsr drop.body
         rts
 
 
+;;; - ( n1 n2 -- n3 ) Subtracts n2 from n1 to get n3.
+        .entry minus, "-"
+        lda 2,x                 ; a := n1
+        sec
+        sbc 0,x                 ; a -= n2
+        sta 2,x                 ; n3 := a
+        inx
+        inx                     ; pop n2 off stack
+        rts
+
+
 ;;; NUMBER ( c-addr u -- n ) Converts the string at c-addr to a
 ;;; number.
         .entry number, "NUMBER"
@@ -386,6 +397,17 @@ _error
         .al
         jmp quit.body
 _err_msg .null "Could not find word in dictionary"
+
+
+;;; + ( n1 n2 -- n3 ) Adds n1 to n2 to get n3.
+        .entry plus, "+"
+        lda 0,x                 ; a := n2
+        clc
+        adc 2,x                 ; a += n1
+        sta 2,x                 ; n3 := a
+        inx
+        inx                     ; pop n2 off stack
+        rts
 
 
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
