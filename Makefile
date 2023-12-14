@@ -1,13 +1,10 @@
 # Path to 64tass executable
 64TASS = 64tass
 
-forth.hex : forth.asm header.asm boot.preprocessed
+forth.hex : forth.asm header.asm boot.fs
 	64tass --intel-hex -o forth.hex -L forth.lst forth.asm
 
-boot.preprocessed : boot.fs
-	tr '\n' ' ' <boot.fs >boot.preprocessed
-
 clean :
-	rm -f forth.hex forth.lst boot.preprocessed
+	rm -f forth.hex forth.lst
 
 .PHONY : clean

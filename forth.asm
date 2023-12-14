@@ -41,17 +41,23 @@ tmp                             ; Temporary storage
         jsr left_bracket.body
 
         ;; Load boot program.
-        lda #boot
+        lda #boot_t
         sta s_addr
-        lda #bootend-boot
+        lda #len(boot)
         sta n_tib
         stz toin_v
         jsr interpret.body
 
         jmp quit.body
 
-boot    .binary "boot.preprocessed"
-bootend
+boot    = binary("boot.fs")
+boot_t  .for i:=0, i<len(boot), i+=1
+        .if boot[i]==10
+        .byte ' '
+        .else
+        .byte boot[i]
+        .endif
+        .endfor
 
 ;;; Each entry in the dictionary is formatted as a variable-length
 ;;; name field (as a counted string) followed by a 2-byte field for
