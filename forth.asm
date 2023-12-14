@@ -1137,65 +1137,73 @@ _end    jsr drop.body
         rts
 
 
+;;; SCAN-WHILE ( addr1 n1 x xt -- addr2 n2 ) Move the string pointed to
+;;; by addr1 n1 until the predicate xt ( char x -- ) with argument x
+;;; fails on a character of the string.
+        ;; : SCAN-WHILE
+        ;;    2>R   ( addr1 n1 ) ( R: x xt )
+        ;;    BEGIN
+        ;;       DUP  WHILE
+        ;;       OVER C@ 2R@ EXECUTE  WHILE
+        ;;       1 /STRING
+        ;;    REPEAT  THEN
+        ;;    2R> 2DROP ;
+        .entry scan_while, "SCAN-WHILE"
+        jsr two_to_r.body
+_begin  jsr dup.body
+        jsr zero_branch.body
+        .word _end
+        jsr over.body
+        jsr c_fetch.body
+        jsr two_r_fetch.body
+        jsr execute.body
+        jsr zero_branch.body
+        .word _end
+        jsr lit.body
+        .sint 1
+        jsr slash_string.body
+        jmp _begin
+_end    jsr two_r_from.body
+        jsr two_drop.body
+        rts
+
+
 ;;; PARSE <text> Parse a string up until the next occurrence of the
 ;;; given delimiter and return the address and length.
         ;; : PARSE  ( char -- addr n )
-        ;;    >R                ( ) ( R: char )
-        ;;    >IN @ DUP         ( n n )
-        ;;    \ increment value on stack until delimeter found or end
-        ;;    \ of line
-        ;;    BEGIN
-        ;;       DUP TIB + C@ R@ <>   ( n1 n2 flag1 )
-        ;;       OVER #TIB @ <   ( n1 n2 flag1 flag2 )
-        ;;       AND   ( n1 n2 flag' )
-        ;;    WHILE   ( n1 n2 )
-        ;;       1+   ( n1 n2' )
-        ;;    REPEAT   ( n1 n2 )
-        ;;    R> DROP           \ no need for char now  ( n1 n2 ) ( R: )
-        ;;    DUP DUP #TIB @ < - >IN !    \ update >IN, +1 if not at end  ( n1 n2 )
-        ;;    OVER - >R         \ calculate n  ( n1 ) ( R: n )
-        ;;    TIB +             \ calculate addr ( addr )
-        ;;    R> ;   ( addr n )
+        ;;    \ get source and save starting address
+        ;;    SOURCE >IN @ /STRING OVER >R   ( char start len R: start )
+        ;;    \ scan while not delimiter
+        ;;    ROT ['] <> SCAN-WHILE   ( end rest R: start )
+        ;;    \ get address of character after word, skip delim if necessary
+        ;;    2DUP 0<> -   ( end rest after R: start )
+        ;;    \ update >IN to offset of after from source
+        ;;    SOURCE DROP - >IN !   ( end rest R: start )
+        ;;    \ calculate addr and length
+        ;;    DROP R> TUCK - ;
         .entry parse, "PARSE"
-        jsr to_r.body
+        jsr source.body
         jsr toin.body
         jsr fetch.body
-        jsr dup.body
-_begin  jsr dup.body
-        jsr lit.body
-        .word tib
-        jsr plus.body
-        jsr c_fetch.body
-        jsr r_fetch.body
-        jsr not_equal.body
+        jsr slash_string.body
         jsr over.body
+        jsr to_r.body
+        jsr rot.body
         jsr lit.body
-        .word n_tib
-        jsr fetch.body
-        jsr less_than.body
-        jsr and_.body
-        jsr zero_branch.body
-        .word _after
-        jsr one_plus.body
-        jmp _begin
-_after  jsr r_from.body
+        .word not_equal.body
+        jsr scan_while.body
+        jsr two_dup.body
+        jsr zero_not_equal.body
+        jsr minus.body
+        jsr source.body
         jsr drop.body
-        jsr dup.body
-        jsr dup.body
-        jsr lit.body
-        .word n_tib
-        jsr fetch.body
-        jsr less_than.body
         jsr minus.body
         jsr toin.body
         jsr store.body
-        jsr over.body
-        jsr minus.body
-        jsr to_r.body
-        jsr lit.body
-        .word tib
-        jsr plus.body
+        jsr drop.body
         jsr r_from.body
+        jsr tuck.body
+        jsr minus.body
         rts
 
 
@@ -1231,6 +1239,17 @@ _type   jsr typen.body
 
 _ok     .null " ok", $0D
 _comp   .null " compiled", $0D
+
+
+;;; SOURCE ( -- addr u ) Return the address and length of the input
+;;; buffer.
+        .entry source, "SOURCE"
+        jsr lit.body
+        .word tib
+        jsr lit.body
+        .word n_tib
+        jsr fetch.body
+        rts
 
 
 ;;; >IN ( -- addr ) Return the address of a cell that contains the
