@@ -340,10 +340,235 @@ _end    rts
         rts
 
 
+;;; --------------------------------
+;;;      ARITHMETIC OPERATIONS
+;;; --------------------------------
+
+;;; + ( n1 n2 -- n3 ) Adds n1 to n2 to get n3.
+        .entry plus, "+"
+        lda 0,x                 ; a := n2
+        clc
+        adc 2,x                 ; a += n1
+        sta 2,x                 ; n3 := a
+        inx
+        inx                     ; pop n2 off stack
+        rts
+
+
+;;; - ( n1 n2 -- n3 ) Subtracts n2 from n1 to get n3.
+        .entry minus, "-"
+        lda 2,x                 ; a := n1
+        sec
+        sbc 0,x                 ; a -= n2
+        sta 2,x                 ; n3 := a
+        inx
+        inx                     ; pop n2 off stack
+        rts
+
+
+;;; / ( n1 n2 -- n3 ) Divide n1 by n2, leaving the quotient n3.
+        .entry slash, "/"
+        jsr slash_mod.body
+        jsr nip.body
+        rts
+
+
+;;; /MOD ( n1 n2 -- n3 n4 ) Divide n1 by n2, leaving the remainder n3
+;;; and quotient n4.
+        .entry slash_mod, "/MOD"
+_dividend = tmp
+_divisor = tmp+2
+_quotient = tmp+4
+_neg    = tmp+6                 ; negative flag (msb)
+
+        ldy #0                  ; holds negative flag
+        lda 2,x                 ; get dividend
+        sta _dividend           ; save dividend
+        bpl _dividend_pos       ; if positive, don't negate
+        eor #$FFFF
+        inc a
+        sta _dividend           ; save -dividend
+        tya
+        eor #$8000              ; toggle negative flag
+        tay
+_dividend_pos
+        lda 0,x                 ; get divisor
+        sta _divisor            ; save divisor
+        bpl _divisor_pos        ; if positive, don't negate
+        eor #$FFFF
+        inc a
+        sta _divisor            ; save -divisor
+        tya
+        eor #$8000              ; toggle negative flag
+        tay
+_divisor_pos
+        sty _neg                ; save negative flag
+
+        ;; Shift the divisor leftwards, storing the amount shifted in
+        ;; y.  Stop when divisor >= dividend (unsigned); since
+        ;; dividend is at maximum $80, a nonzero divisor will always
+        ;; be greater than or equal to it when shifted enough without
+        ;; losing information.
+        ldy #0                  ; number of shifts
+        lda _divisor
+_shift_loop
+        cmp _dividend
+        bge _end_shift          ; if divisor >= dividend, no need to
+                                ; shift more
+        asl a                   ; shift divisor left once
+        iny                     ; count the shifts
+        bra _shift_loop         ; try to shift again
+
+_end_shift
+        sta _divisor            ; save shifted divisor
+        stz _quotient           ; initialize quotient to 0
+
+        ;; Perform long division with y+1 places.
+_div_loop
+        lda _dividend           ; load current dividend
+        sec
+        sbc _divisor            ; subtract the shifted divisor, set
+                                ; carry bit if dividend >= divisor
+        php
+        rol _quotient           ; shift carry bit into quotient (1 if
+                                ; dividend >= divisor, 0 otherwise)
+        plp                     ; get carry bit from subtraction
+        blt _no_sub             ; if dividend<divisor, don't save the
+                                ; subtracted dividend
+        sta _dividend           ; save subtracted dividend
+_no_sub lsr _divisor            ; shift divisor right once
+        dey                     ; count shift
+        bpl _div_loop           ; if y is not negative, do another
+                                ; iteration
+
+        ;; Return quotient and remainder, negated if _neg is set.
+        lda _dividend           ; load remainder
+        bit _neg
+        bpl _no_neg_remainder   ; if _neg not set, don't negate
+                                ; remainder
+        eor #$FFFF
+        inc a                   ; negate remainder
+_no_neg_remainder
+        sta 2,x                 ; store in n3
+        lda _quotient           ; load quotient
+        bit _neg
+        bpl _no_neg_quotient    ; if _neg not set, don't negate
+                                ; quotient
+        eor #$FFFF
+        inc a                   ; negate quotient
+_no_neg_quotient
+        sta 0,x                 ; store in n4
+
+        rts
+
+
+;;; 1+ ( n1 -- n2 ) Add one to n1, leaving n2.
+        .entry one_plus, "1+"
+        inc 0,x
+        rts
+
+
+;;; 1- ( n1 -- n2 ) Subtract one from n1, leaving n2.
+        .entry one_minus, "1-"
+        dec 0,x
+        rts
+
+
+;;; 2+ ( n1 -- n2 ) Add two to n1, leaving n2.
+        .entry two_plus, "2+"
+        lda 0,x
+        inc a
+        inc a
+        sta 0,x
+        rts
+
+
+;;; 2- ( n1 -- n2 ) Subtract two from n1, leaving n2.
+        .entry two_minus, "2-"
+        lda 0,x
+        dec a
+        dec a
+        sta 0,x
+        rts
+
+
+;;; 2* ( x1 -- x2 ) Return x2, the result of shifting x1 one bit
+;;; toward the most-significant bit, filling the least significant bit
+;;; with zero.
+        .entry two_star, "2*"
+        asl 0,x
+        rts
+
+
+;;; 2/ ( x1 -- x2 ) Return x2, the result of shifting x1 one bit
+;;; toward the least-significant bit, leaving the most-significant bit
+;;; unchanged.
+        .entry two_slash, "2/"
+        ;; Set C flag depending on msb of x1.
+        lda 0,x
+        bmi _neg
+        clc
+        bra _shift
+_neg    sec
+        ;; Shift x1.
+_shift  ror a
+        sta 0,x
+        rts
+
+
+;;; LSHIFT ( x1 u -- x2 ) Perform a logical left shift of u places on
+;;; x1, giving x2.  Fill the vacated least-significant bits with
+;;; zeroes.
+        .entry lshift, "LSHIFT"
+        lda 2,x                 ; a = x1
+        ldy 0,x                 ; y = u
+        beq _end
+_loop   asl a
+        dey
+        bne _loop
+        sta 2,x
+_end    inx
+        inx
+        rts
+
+
+;;; MOD ( n1 n2 -- n3 ) Divide n1 by n2, giving the remainder n3.
+        .entry mod, "MOD"
+        jsr slash_mod.body
+        jsr drop.body
+        rts
+
+
+;;; RSHIFT ( x1 u -- x2 ) Perform a logical right shift of u places on
+;;; x1, giving x2.  Fill the vacated most-significant bits with
+;;; zeroes.
+        .entry rshift, "RSHIFT"
+        lda 2,x                 ; a = x1
+        ldy 0,x                 ; y = u
+        beq _end
+_loop   lsr a
+        dey
+        bne _loop
+        sta 2,x
+_end    inx
+        inx
+        rts
+
 
 ;;; --------------------------------
-;;;         UNSORTED WORDS
+;;;       LOGICAL OPERATIONS
 ;;; --------------------------------
+
+;;; ABS ( n -- +n ) Replace the top stack item with its absolute
+;;; value.
+        .entry abs, "ABS"
+        lda 0,x
+        bpl _end
+        eor #$FFFF
+        inc a
+        sta 0,x
+_end    rts
+
 
 ;;; AND ( x1 x2 -- x3 ) x3 is the bitwise and of x1 and x2.
         .entry and_, "AND"
@@ -353,6 +578,102 @@ _end    rts
         inx
         inx
         rts
+
+
+;;; INVERT ( x1 -- x2 ) Invert all bits of x1, giving its logical
+;;; inverse x2.
+        .entry invert, "INVERT"
+        lda 0,x
+        eor #$FFFF
+        sta 0,x
+        rts
+
+
+;;; MAX ( n1 n2 -- n3 ) Return n3, the greater of n1 and n2.
+        .entry max, "MAX"
+        lda 2,x                 ; a = n1
+        cmp 0,x                 ; compare with n2
+        bpl _greater
+        lda 0,x
+        sta 2,x
+_greater
+        inx
+        inx
+        rts
+
+
+;;; MIN ( n1 n2 -- n3 ) Return n3, the lesser of n1 and n2.
+        .entry min, "MIN"
+        lda 2,x                 ; a = n1
+        cmp 0,x                 ; compare with n2
+        bmi _less
+        lda 0,x
+        sta 2,x
+_less   inx
+        inx
+        rts
+
+
+;;; NEGATE ( n -- -n ) Change the sign of the top stack value.
+        .entry negate, "NEGATE"
+        lda 0,x
+        eor #$FFFF
+        inc a
+        sta 0,x
+        rts
+
+
+;;; OR ( x1 x2 -- x3 ) x3 is the bitwise inclusive or of x1 and x2.
+        .entry or, "OR"
+        lda 0,x
+        ora 2,x
+        sta 2,x
+        inx
+        inx
+        rts
+
+
+;;; WITHIN ( x1 x2 x3 -- flag ) Return true if x1 is greater than or
+;;; equal to x2 and less than x3.  The values may all be either
+;;; unsigned integers or signed integers, but must all be the same
+;;; type.
+        .entry within, "WITHIN"
+        ;; To accomodate both signednesses, use the formula x1-x2 <
+        ;; x3-x2 with an unsigned comparison.
+        lda 0,x                 ; a = x3
+        sec
+        sbc 2,x                 ; a = x3-x2
+        sta tmp                 ; save a in tmp
+        lda 4,x                 ; a = x1
+        sec
+        sbc 2,x                 ; a = x1-x2
+        inx
+        inx
+        inx
+        inx
+        cmp tmp                 ; compare x1-x2 to x3-x2
+        blt _less
+        stz 0,x
+        rts
+_less   lda #-1
+        sta 0,x
+        rts
+
+
+;;; XOR ( x1 x2 -- x3 ) x3 is the bitwise exclusive or of x1 and x2.
+        .entry xor, "XOR"
+        lda 0,x
+        eor 2,x
+        sta 2,x
+        inx
+        inx
+        rts
+
+
+
+;;; --------------------------------
+;;;         UNSORTED WORDS
+;;; --------------------------------
 
 
 ;;; BL ( -- c ) Push an ASCII space onto the stack.
@@ -857,26 +1178,6 @@ _end    jsr drop.body
         rts
 
 
-;;; - ( n1 n2 -- n3 ) Subtracts n2 from n1 to get n3.
-        .entry minus, "-"
-        lda 2,x                 ; a := n1
-        sec
-        sbc 0,x                 ; a -= n2
-        sta 2,x                 ; n3 := a
-        inx
-        inx                     ; pop n2 off stack
-        rts
-
-
-;;; NEGATE ( n -- -n )
-        .entry negate, "NEGATE"
-        lda 0,x
-        eor #$FFFF
-        inc a
-        sta 0,x
-        rts
-
-
 ;;; <> ( x1 x2 -- flag ) flag is true when x1 is not equal to x2.
         .entry not_equal, "<>"
         lda 0,x
@@ -986,28 +1287,6 @@ _error
 _err_msg .null "Could not find word in dictionary"
 
 
-;;; 1- ( n1 -- n2 ) n2 is n1 - 1.
-        .entry one_minus, "1-"
-        dec 0,x
-        rts
-
-
-;;; 1+ ( n1 -- n2 ) n2 is n1 + 1.
-        .entry one_plus, "1+"
-        inc 0,x
-        rts
-
-
-;;; OR ( x1 x2 -- x3 ) x3 is the bitwise inclusive or of x1 and x2.
-        .entry or, "OR"
-        lda 0,x
-        ora 2,x
-        sta 2,x
-        inx
-        inx
-        rts
-
-
 ;;; PARSE <text> Parse a string up until the next occurrence of the
 ;;; given delimiter and return the address and length.
         ;; : PARSE  ( char -- addr n )
@@ -1054,17 +1333,6 @@ _after  jsr r_from.body
         jsr store.body
         jsr r_from.body
         jsr r_from.body
-        rts
-
-
-;;; + ( n1 n2 -- n3 ) Adds n1 to n2 to get n3.
-        .entry plus, "+"
-        lda 0,x                 ; a := n2
-        clc
-        adc 2,x                 ; a += n1
-        sta 2,x                 ; n3 := a
-        inx
-        inx                     ; pop n2 off stack
         rts
 
 
@@ -1207,95 +1475,6 @@ _fin    stx n_tib
         jsr fetch.body
         jsr c_store.body
         jsr left_bracket.body
-        rts
-
-
-;;; /MOD ( n1 n2 -- n3 n4 ) Divide n1 by n2, leaving the remainder n3
-;;; and quotient n4.
-        .entry slash_mod, "/MOD"
-_dividend = tmp
-_divisor = tmp+2
-_quotient = tmp+4
-_neg    = tmp+6                 ; negative flag (msb)
-
-        ldy #0                  ; holds negative flag
-        lda 2,x                 ; get dividend
-        sta _dividend           ; save dividend
-        bpl _dividend_pos       ; if positive, don't negate
-        eor #$FFFF
-        inc a
-        sta _dividend           ; save -dividend
-        tya
-        eor #$8000              ; toggle negative flag
-        tay
-_dividend_pos
-        lda 0,x                 ; get divisor
-        sta _divisor            ; save divisor
-        bpl _divisor_pos        ; if positive, don't negate
-        eor #$FFFF
-        inc a
-        sta _divisor            ; save -divisor
-        tya
-        eor #$8000              ; toggle negative flag
-        tay
-_divisor_pos
-        sty _neg                ; save negative flag
-
-        ;; Shift the divisor leftwards, storing the amount shifted in
-        ;; y.  Stop when divisor >= dividend (unsigned); since
-        ;; dividend is at maximum $80, a nonzero divisor will always
-        ;; be greater than or equal to it when shifted enough without
-        ;; losing information.
-        ldy #0                  ; number of shifts
-        lda _divisor
-_shift_loop
-        cmp _dividend
-        bge _end_shift          ; if divisor >= dividend, no need to
-                                ; shift more
-        asl a                   ; shift divisor left once
-        iny                     ; count the shifts
-        bra _shift_loop         ; try to shift again
-
-_end_shift
-        sta _divisor            ; save shifted divisor
-        stz _quotient           ; initialize quotient to 0
-
-        ;; Perform long division with y+1 places.
-_div_loop
-        lda _dividend           ; load current dividend
-        sec
-        sbc _divisor            ; subtract the shifted divisor, set
-                                ; carry bit if dividend >= divisor
-        php
-        rol _quotient           ; shift carry bit into quotient (1 if
-                                ; dividend >= divisor, 0 otherwise)
-        plp                     ; get carry bit from subtraction
-        blt _no_sub             ; if dividend<divisor, don't save the
-                                ; subtracted dividend
-        sta _dividend           ; save subtracted dividend
-_no_sub lsr _divisor            ; shift divisor right once
-        dey                     ; count shift
-        bpl _div_loop           ; if y is not negative, do another
-                                ; iteration
-
-        ;; Return quotient and remainder, negated if _neg is set.
-        lda _dividend           ; load remainder
-        bit _neg
-        bpl _no_neg_remainder   ; if _neg not set, don't negate
-                                ; remainder
-        eor #$FFFF
-        inc a                   ; negate remainder
-_no_neg_remainder
-        sta 2,x                 ; store in n3
-        lda _quotient           ; load quotient
-        bit _neg
-        bpl _no_neg_quotient    ; if _neg not set, don't negate
-                                ; quotient
-        eor #$FFFF
-        inc a                   ; negate quotient
-_no_neg_quotient
-        sta 0,x                 ; store in n4
-
         rts
 
 
