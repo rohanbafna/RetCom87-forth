@@ -858,11 +858,6 @@ _less   lda #-1
         rts
 
 
-four    .text "four"
-four2   .text "four"
-five    .text "five"
-
-
 ;;; =STRING ( addr1 addr2 u -- flag ) Compare the two strings at addr1
 ;;; and addr2, both of length u, and return flag, which is true if the
 ;;; strings are equal and false if not
@@ -1029,6 +1024,34 @@ _nomatch
         rts
 
 
+;;; MATCHES? ( addr1 u addr2 -- flag ) Compare the string given by
+;;; addr1 u to the dictionary entry given by addr2.  Flag is -1 if
+;;; they match and 0 if not.
+        ;; : MATCHES?   COUNT NOCTRL AND   ( addr1 u addr2' u2 )
+        ;;    ROT OVER =  IF   ( addr1 addr2' u2 )
+        ;;       =STRING   ( flag )
+        ;;    ELSE
+        ;;       2DROP DROP 0
+        ;;    THEN ;
+        .entry matches_question, "MATCHES?"
+        jsr count.body
+        jsr lit.body
+        .word noctrl
+        jsr and_.body
+        jsr rot.body
+        jsr over.body
+        jsr equal.body
+        jsr zero_branch.body
+        .word _else
+        jsr equal_string.body
+        jmp _then
+_else   jsr two_drop.body
+        jsr drop.body
+        jsr lit.body
+        .sint 0
+_then   rts
+
+
 ;;; LATEST ( -- addr ) Return a cell containing the address of the
 ;;; latest dictionary entry.
         .entry latest, "LATEST"
@@ -1117,20 +1140,27 @@ _end    jsr drop.body
 ;;; PARSE <text> Parse a string up until the next occurrence of the
 ;;; given delimiter and return the address and length.
         ;; : PARSE  ( char -- addr n )
-        ;;    >R                \ save char to return stack
-        ;;    >IN @             \ start with current value of >IN
-        ;;    \ increment value on stack until delimeter found
-        ;;    BEGIN  DUP TIB + C@ R@ <>  WHILE  1+  REPEAT
-        ;;    R> DROP           \ no need for char now
-        ;;    DUP >IN @ - >R    \ save n on return stack
-        ;;    >IN @ TIB + >R    \ save addr on return stack
-        ;;    1+ >IN !          \ update >IN
-        ;;    R> R>             \ get n and addr from return stack
-        ;; ;
+        ;;    >R                ( ) ( R: char )
+        ;;    >IN @ DUP         ( n n )
+        ;;    \ increment value on stack until delimeter found or end
+        ;;    \ of line
+        ;;    BEGIN
+        ;;       DUP TIB + C@ R@ <>   ( n1 n2 flag1 )
+        ;;       OVER #TIB @ <   ( n1 n2 flag1 flag2 )
+        ;;       AND   ( n1 n2 flag' )
+        ;;    WHILE   ( n1 n2 )
+        ;;       1+   ( n1 n2' )
+        ;;    REPEAT   ( n1 n2 )
+        ;;    R> DROP           \ no need for char now  ( n1 n2 ) ( R: )
+        ;;    DUP DUP #TIB @ < - >IN !    \ update >IN, +1 if not at end  ( n1 n2 )
+        ;;    OVER - >R         \ calculate n  ( n1 ) ( R: n )
+        ;;    TIB +             \ calculate addr ( addr )
+        ;;    R> ;   ( addr n )
         .entry parse, "PARSE"
         jsr to_r.body
         jsr toin.body
         jsr fetch.body
+        jsr dup.body
 _begin  jsr dup.body
         jsr lit.body
         .word tib
@@ -1138,6 +1168,12 @@ _begin  jsr dup.body
         jsr c_fetch.body
         jsr r_fetch.body
         jsr not_equal.body
+        jsr over.body
+        jsr lit.body
+        .word n_tib
+        jsr fetch.body
+        jsr less_than.body
+        jsr and_.body
         jsr zero_branch.body
         .word _after
         jsr one_plus.body
@@ -1145,20 +1181,20 @@ _begin  jsr dup.body
 _after  jsr r_from.body
         jsr drop.body
         jsr dup.body
-        jsr toin.body
+        jsr dup.body
+        jsr lit.body
+        .word n_tib
         jsr fetch.body
+        jsr less_than.body
+        jsr minus.body
+        jsr toin.body
+        jsr store.body
+        jsr over.body
         jsr minus.body
         jsr to_r.body
-        jsr toin.body
-        jsr fetch.body
         jsr lit.body
         .word tib
         jsr plus.body
-        jsr to_r.body
-        jsr one_plus.body
-        jsr toin.body
-        jsr store.body
-        jsr r_from.body
         jsr r_from.body
         rts
 
@@ -1537,6 +1573,14 @@ _true   lda #-1
         .word 0
         jsr state.body
         jsr store.body
+        rts
+
+
+;;; < ( n1 n2 -- flag ) Compare n1 and n2.  If n1 is less than n2 then
+;;; flag is -1, otherwise flag is 0.
+        .entry less_than, "<"
+        jsr minus.body
+        jsr zero_less_than.body
         rts
 
 
