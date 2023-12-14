@@ -672,15 +672,582 @@ _less   lda #-1
 
 
 ;;; --------------------------------
-;;;         UNSORTED WORDS
+;;;       MEMORY OPERATIONS
 ;;; --------------------------------
 
+;;; ! ( x addr -- ) Stores x into the cell at addr.
+        .entry store, "!"
+        lda 2,x
+        sta (0,x)
+        txa
+        clc
+        adc #4
+        tax
+        rts
+
+
+;;; +! ( x addr -- ) Adds x to the current value of the cell at addr.
+        .entry plus_store, "+!"
+        lda 2,x
+        clc
+        adc (0,x)
+        sta (0,x)
+        txa
+        clc
+        adc #4
+        tax
+        rts
+
+
+;;; 2! ( x1 x2 addr -- ) Store the cell pair x1 x2 in the two cells
+;;; beginning at addr, removing three cells from the stack.  The order
+;;; of the two cells in memory is the same as on the stack.
+        .entry two_store, "2!"
+        lda 0,x                 ; load addr into a
+        sta tmp                 ; save addr into tmp
+        lda 2,x                 ; load x2 into a
+        sta (tmp)               ; save x2 into addr
+        ldy #2
+        lda 4,x                 ; load x1 into a
+        sta (tmp),y             ; store x1 into addr+2
+        txa
+        clc
+        adc #6
+        tax                     ; pop 3 cells off stack
+        rts
+
+
+;;; 2@ ( addr -- x1 x2 ) Push the cell pair x1 x2 at addr onto the top
+;;; of the stack.
+        .entry two_fetch, "2@"
+        lda 0,x                 ; load addr into a
+        sta tmp                 ; save addr into tmp
+        dex
+        dex                     ; leave space for x2
+        lda (tmp)               ; load x2
+        sta 0,x                 ; store on stack
+        ldy #2
+        lda (tmp),y             ; load x1
+        sta 2,x                 ; store on stack
+        rts
+
+
+;;; @ ( addr -- x ) Replace addr with the contents of the cell at
+;;; addr.
+        .entry fetch, "@"
+        lda (0,x)
+        sta 0,x
+        rts
+
+
+;; ;;; BLANK ( addr u -- ) Set a region of memory, at address addr of
+;; ;;; length u, to ASCII blanks.
+;;         .entry blank, "BLANK"
+;;         lda 2,x
+;;         sta tmp                 ; move addr to tmp
+;;         ldy #0                  ; y stores index
+;; _loop   cpy 0,x                 ; compare y to u
+;;         beq _end
+;;         stz (tmp),y
+;;         iny
+;;         bra _loop
+;; _end    inx
+;;         inx
+;;         inx
+;;         inx
+;;         rts
+
+
+
+;;; --------------------------------
+;;;             STRINGS
+;;; --------------------------------
+
+;;; For the interpreter, it's easier to just write a definition to
+;;; check if two strings are equal.
+
+;; ;;; COMPARE ( addr1 u1 addr2 u2 -- n ) Compare the string specified by
+;; ;;; addr1 u1 to the string specified by addr2 u2 and return a result
+;; ;;; code n, which is 0 if the strings are equal, -1 if the first
+;; ;;; string is less than the second string, and 1 if the second string
+;; ;;; is less than the first string.
+;;         ;; : COMPARE ( addr1 u1 addr2 u2 -- n )
+;;         ;;    BEGIN  2 PICK ( u1 ) 0<> OVER ( u2 ) 0<> AND  WHILE
+;;         ;;       3 PICK ( addr1 ) C@   ( addr1 u1 addr2 u2 c1 )
+;;         ;;       2 PICK ( addr2 ) C@   ( addr1 u1 addr2 u2 c1 c2 )
+;;         ;;       2DUP <  IF  
+;;         .entry compare, "COMPARE"
+;; _addr1  = tmp
+;; _u1     = tmp+2
+;; _addr2  = tmp+4
+;; _u2     = tmp+6
+;;         lda 6,x
+;;         sta _addr1
+;;         lda 4,x
+;;         sta _u1
+;;         lda 2,x
+;;         sta _addr2
+;;         lda 0,x
+;;         sta 
+
+
+;;; COUNT ( addr -- addr u ) Returns the count and string portions
+;;; from a counted string.
+        .entry count, "COUNT"
+        lda (0,x)               ; Get first two bytes of string
+        and #$FF                ; Clear high byte
+        inc 0,x                 ; Move addr past count byte
+        dex
+        dex
+        sta 0,x                 ; Push count to stack
+        rts
+
+
+;;; CMOVE ( addr1 addr2 u -- ) If u is greater than zero, copy u
+;;; consecutive characters from the data space starting at addr1 to
+;;; that starting at addr2, proceeding character-by-character from
+;;; lower addresses to higher addresses.
+        .entry cmove, "CMOVE"
+        stx tmp                 ; save stack pointer
+        ldy 2,x                 ; load y with addr2
+        lda 4,x
+        tax                     ; load x with addr1
+        lda (tmp)               ; load a with u
+        dec a                   ; decrement a (needed for mvn to work)
+        mvn 0,0                 ; move a+1 bytes from (x) to (y)
+        lda tmp
+        clc
+        adc #6
+        tax                     ; restore x with tmp+6 (pops 3 cells
+                                ; off the stack)
+        rts
+
+
+;;; CMOVE> ( addr1 addr2 u -- ) If u is greater than zero, copy u
+;;; consecutive characters from the data space starting at addr1 to
+;;; that starting at addr2, proceeding character-by-character from
+;;; higher addresses to lower addresses.
+        .entry cmove_up, "CMOVE>"
+        stx tmp                 ; save stack pointer
+        dec 0,x                 ; decrement u (needed for mvp to work)
+        lda 2,x
+        clc
+        adc 0,x
+        tay                     ; load y with addr2+u-1
+        lda 4,x
+        clc
+        adc 0,x
+        tax                     ; load x with addr1+u-1
+        lda (tmp)               ; load a with u-1
+        mvp 0,0                 ; move a+1 bytes from (x) to (y)
+        lda tmp
+        clc
+        adc #6
+        tax                     ; restore x with tmp+6 (pops 3 cells
+                                ; off the stack)
+        rts
+
+
+;;; =STRING ( addr1 addr2 u -- flag ) Compare the two strings at addr1
+;;; and addr2, both of length u, and return flag, which is true if the
+;;; strings are equal and false if not
+        .entry equal_string, "=STRING"
+_addr1  = tmp
+_addr2  = tmp+2
+_u      = tmp+4
+        ;; Populate _addr1, _addr2, and _u.
+        lda 4,x
+        sta _addr1
+        lda 2,x
+        sta _addr2
+        lda 0,x
+        sta _u
+        ;; Pop 2 items off stack (leave space for flag).
+        inx
+        inx
+        inx
+        inx
+        ;; Perform string comparison with u iterations
+        ldy #0                  ; y starts at 0
+_loop   cpy _u
+        beq _equal              ; if y = u, break
+        lda (_addr1),y          ; load char from string 1
+        cmp (_addr2),y          ; compare with char from string 2
+        bne _not_equal          ; if not equal, break
+        iny
+        bra _loop
+        ;; If fell out of loop, then strings are equal
+_equal  lda #-1
+        sta 0,x
+        rts
+        ;; If discovered two characters were not equal, strings are
+        ;; not equal
+_not_equal
+        stz 0,x
+        rts
+
+
+;;; /STRING ( addr1 u1 n -- addr2 u2 ) Adjust the character string at
+;;; addr1 u1 by n characters to get addr2 u2.
+        ;; : /STRING ( addr1 u1 n -- addr2 u2 )
+        ;;    DUP ROT SWAP   ( addr1 n u1 n )
+        ;;    - >R + R> ;
+        .entry slash_string, "/STRING"
+        jsr dup.body
+        jsr rot.body
+        jsr swap.body
+        jsr minus.body
+        jsr to_r.body
+        jsr plus.body
+        jsr r_from.body
+        rts
+
+
+;;; --------------------------------
+;;;           DICTIONARY
+;;; --------------------------------
+
+;;; FIND ( c-addr -- c-addr 0 | xt 1 | xt -1 ) Find the definition
+;;; corresponding to the c-addr word and either return c-addr and zero
+;;; (if not found), xt and 1 (if found and immediate), or xt and -1
+;;; (if found and not immediate).
+        .entry find, "FIND"
+_count  = tmp                   ; Count of characters to compare
+_sp     = tmp+2                 ; Saved stack pointer
+_ep     = tmp+4                 ; Dict entry pointer
+_wp     = tmp+6                 ; Word pointer
+
+        lda 0,x
+        sta _wp                 ; Save word pointer
+
+        sep #FLAGM
+        .as
+        lda (0,x)               ; Get count from c-addr
+        inc a                   ; Increment to account for count byte
+        sta _count              ; Save count
+        stz _count+1            ; Zero out high byte of tmp
+
+        stx _sp                 ; Save stack pointer
+        ldx dict_head           ; x points to the dict entry
+
+        ;; Compare word to dict entry's word.
+_loop
+        stx _ep                 ; Save dict entry pointer
+
+        ;; Compare count bytes (we need to mask out the control bits).
+        lda 0,x                 ; load count byte from entry
+        bit #smudge             ; test smudge bit
+        bne _nomatch            ; if smudge bit set, ignore entry
+        and #noctrl             ; ignore control bits
+        cmp (_wp)               ; compare with count from word
+        bne _nomatch            ; break if not equal (no match)
+        inx                     ; go to next char in dict entry
+
+        ldy #1                  ; Y indexes to the start of word, past
+                                ; count byte
+
+        ;; Check if the dict entry name matches the current word.
+_test_entry
+        ;; On each iteration, compare current character in the word
+        ;; with the corresponding character in the dict entry.  If not
+        ;; equal, break (no match).  Increment Y and if y >= count,
+        ;; found a match.
+        lda (_wp),y             ; load current char in word
+        cmp 0,x                 ; compare with char in dict entry
+        bne _nomatch            ; break if not equal (no match)
+        inx                     ; go to next char in dict entry
+        iny                     ; go to next char in word
+        cpy _count
+        bmi _test_entry         ; if y < count, repeat
+
+_match
+        ;; We found a match.  Push return values on stack and return.
+        inx
+        inx                     ; x now points to xt
+        txy                     ; y points to xt
+        ldx _sp                 ; restore sp to x
+        sty 0,x                 ; replace c-addr with xt
+
+        ldy #1
+        lda (_ep)               ; check count byte of array
+        bit #precedence         ; check precedence flag
+        bne _imm                ; if set, push 1 instead of -1
+        ldy #-1                 ; set y to -1
+_imm    dex
+        dex
+        sty 0,x                 ; push 1 or -1 to stack
+
+        rep #FLAGM
+        .al
+        rts
+
+_nomatch
+        ;; The word didn't match the dictionary entry, so go to the
+        ;; next one.
+        .as
+        rep #FLAGM
+        .al
+        lda (_ep)               ; a gets count byte of entry
+        and #noctrl             ; clear high byte and control bits
+        inc a                   ; account for count byte
+        tay                     ; y gets count
+        lda (_ep),y             ; a gets dict-entry at offset count
+                                ; (lf field)
+        sep #FLAGM
+        .as
+        tax                     ; x gets lf field
+        ;; If dict entry's link is empty, we're at the end of the
+        ;; dictionary and didn't find a match, so return.  Otherwise
+        ;; try again with the next entry.
+        bne _loop
+
+        ;; No match found.  Push 0 and return.
+        rep #FLAGM
+        .al
+        ldx _sp                 ; restore sp to x
+        dex
+        dex
+        stz 0,x                 ; push 0
+
+        rts
+
+
+;;; LATEST ( -- addr ) Return a cell containing the address of the
+;;; latest dictionary entry.
+        .entry latest, "LATEST"
+        jsr lit.body
+        .word dict_head
+        rts
+
+
+;;; PREV-ENTRY ( addr -- addr' | 0 ) Replace addr, which points to a
+;;; dictionary entry, with a pointer to the previous dictionary entry,
+;;; or 0 if addr was the first dictionary entry.
+        ;; : PREV-ENTRY ( addr -- addr' | 0 )   COUNT + @ ;
+        .entry prev_entry, "PREV-ENTRY"
+        jsr count.body
+        jsr plus.body
+        jsr fetch.body
+        rts
+
+
+
+;;; --------------------------------
+;;;          INTERPRETER
+;;; --------------------------------
 
 ;;; BL ( -- c ) Push an ASCII space onto the stack.
         .entry bl, "BL"
         jsr lit.body
         .word ' '
         rts
+
+
+;;; INTERPRET ( -- ? ) Interpret or compile a line of code.
+        ;; BEGIN  BL WORD DUP COUNT  WHILE
+        ;;    DROP FIND ?DUP  IF
+        ;;       STATE @  IF
+        ;;          0>  IF  EXECUTE  ELSE  COMPILE,  THEN
+        ;;       ELSE
+        ;;          DROP EXECUTE
+        ;;       THEN
+        ;;    ELSE
+        ;;       COUNT NUMBER
+        ;;       STATE @  IF  LITERAL  THEN
+        ;;    THEN
+        ;; AGAIN
+        ;; DROP DROP ;
+        .entry interpret, "INTERPRET"
+_loop   jsr bl.body
+        jsr word.body
+        jsr dup.body
+        jsr count.body
+        jsr zero_branch.body
+        .word _end
+        jsr drop.body
+        jsr find.body
+        jsr question_dup.body
+        jsr zero_branch.body
+        .word _else1
+        jsr state.body
+        jsr fetch.body
+        jsr zero_branch.body
+        .word _else2
+        jsr zero_greater_than.body
+        jsr zero_branch.body
+        .word _else3
+        jsr execute.body
+        jmp _then3
+_else3  jsr compile_comma.body
+_then3  jmp _then2
+_else2  jsr drop.body
+        jsr execute.body
+_then2  jmp _then1
+_else1  jsr count.body
+        jsr number.body
+        jsr state.body
+        jsr fetch.body
+        jsr zero_branch.body
+        .word _then4
+        jsr literal.body
+_then4
+_then1  jmp _loop
+_end    jsr drop.body
+        jsr drop.body
+        rts
+
+
+;;; PARSE <text> Parse a string up until the next occurrence of the
+;;; given delimiter and return the address and length.
+        ;; : PARSE  ( char -- addr n )
+        ;;    >R                \ save char to return stack
+        ;;    >IN @             \ start with current value of >IN
+        ;;    \ increment value on stack until delimeter found
+        ;;    BEGIN  DUP TIB + C@ R@ <>  WHILE  1+  REPEAT
+        ;;    R> DROP           \ no need for char now
+        ;;    DUP >IN @ - >R    \ save n on return stack
+        ;;    >IN @ TIB + >R    \ save addr on return stack
+        ;;    1+ >IN !          \ update >IN
+        ;;    R> R>             \ get n and addr from return stack
+        ;; ;
+        .entry parse, "PARSE"
+        jsr to_r.body
+        jsr toin.body
+        jsr fetch.body
+_begin  jsr dup.body
+        jsr lit.body
+        .word tib
+        jsr plus.body
+        jsr c_fetch.body
+        jsr r_fetch.body
+        jsr not_equal.body
+        jsr zero_branch.body
+        .word _after
+        jsr one_plus.body
+        jmp _begin
+_after  jsr r_from.body
+        jsr drop.body
+        jsr dup.body
+        jsr toin.body
+        jsr fetch.body
+        jsr minus.body
+        jsr to_r.body
+        jsr toin.body
+        jsr fetch.body
+        jsr lit.body
+        .word tib
+        jsr plus.body
+        jsr to_r.body
+        jsr one_plus.body
+        jsr toin.body
+        jsr store.body
+        jsr r_from.body
+        jsr r_from.body
+        rts
+
+
+;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
+;;; and interpret a line of code.
+        .entry quit, "QUIT"
+        ;; Clear return and data stacks.
+        ldx #init_psp
+        lda #init_rsp
+        tcs
+        ;; Set STATE to interpretation.
+        jsr left_bracket.body
+
+        sep #FLAGM
+        jsl SEND_CR
+        rep #FLAGM
+
+_loop
+        jsr refill.body
+        jsr interpret.body
+        jsr state.body
+        jsr fetch.body
+        jsr zero_branch.body
+        .word _print_ok
+        jsr lit.body
+        .word _comp
+        jmp _type
+_print_ok
+        jsr lit.body
+        .word _ok
+_type   jsr typen.body
+        jmp _loop
+
+_ok     .null " ok", $0D
+_comp   .null " compiled", $0D
+
+
+;;; >IN ( -- addr ) Return the address of a cell that contains the
+;;; current offset into TIB.
+        .entry toin, ">IN"
+        jsr lit.body
+        .word toin_v
+        rts
+
+
+;;; WORD ( char -- addr ) Parse a word delimited by char from the
+;;; input stream, skipping initial occurrences of char, and store the
+;;; parsed word as a counted string in the dictionary, returning the
+;;; location of the word as addr.
+        .entry word, "WORD"
+        stx tmp                 ; save sp in tmp
+        lda 0,x
+        sta tmp+2               ; store delim in tmp+2
+
+        ldy #0                  ; y is length of word
+        ldx toin_v              ; x gets next index to check.
+        dex
+
+        sep #FLAGM
+        .as
+
+        ;; Skip delims until the start of the word.
+_skip_delims
+        inx
+        cpx n_tib
+        beq _finish             ; If end of input, stop
+        lda TIB,x               ; Load the current char into A
+        cmp tmp+2               ; Compare with delimiter
+        beq _skip_delims        ; If delim, repeat
+
+        ;; Copy word into cp until delim is reached.
+_grab_word
+        iny                     ; Go to next char in output buffer
+        sta (cp_v),y            ; Store character into cp_v at offset
+                                ; y
+        inx
+        cpx n_tib
+        beq _finish             ; If end of input, found whole word
+        lda TIB,x               ; Get next character
+        cmp tmp+2               ; Compare with delimiter
+        bne _grab_word          ; If delim, found whole word, else loop
+        inx                     ; Move past delim if present
+
+        ;; Write the length of the word into the first char and
+        ;; return.
+_finish
+        tya
+        and #$EF                ; clear msb
+        sta (cp_v)              ; Store length into first char.
+
+        stx toin_v              ; Update toin
+        ldx tmp                 ; restore sp into x
+
+        rep #FLAGM
+        .al
+        lda cp_v
+        sta 0,x                 ; Put cp_v on stack.
+
+        rts
+
+
+
+;;; --------------------------------
+;;;         UNSORTED WORDS
+;;; --------------------------------
 
 
 ;;; 0BRANCH ( flag -- ) Branch to address specified in following cell
@@ -812,18 +1379,6 @@ _less   lda #-1
         rts
 
 
-;;; COUNT ( addr -- addr u ) Returns the count and string portions
-;;; from a counted string.
-        .entry count, "COUNT"
-        lda (0,x)               ; Get first two bytes of string
-        and #$FF                ; Clear high byte
-        inc 0,x                 ; Move addr past count byte
-        dex
-        dex
-        sta 0,x                 ; Push count to stack
-        rts
-
-
 ;;; CP ( -- addr ) Return the address of CP.
         .entry cp, "CP"
         jsr lit.body
@@ -934,119 +1489,6 @@ _true   lda #-1
         rts                     ; "Return" to xt
 
 
-;;; @ ( addr -- x ) Replace addr with the contents of the cell at
-;;; addr.
-        .entry fetch, "@"
-        lda (0,x)
-        sta 0,x
-        rts
-
-
-;;; FIND ( c-addr -- c-addr 0 | xt 1 | xt -1 ) Find the definition
-;;; corresponding to the c-addr word and either return c-addr and zero
-;;; (if not found), xt and 1 (if found and immediate), or xt and -1
-;;; (if found and not immediate).
-        .entry find, "FIND"
-_count  = tmp                   ; Count of characters to compare
-_sp     = tmp+2                 ; Saved stack pointer
-_ep     = tmp+4                 ; Dict entry pointer
-_wp     = tmp+6                 ; Word pointer
-
-        lda 0,x
-        sta _wp                 ; Save word pointer
-
-        sep #FLAGM
-        .as
-        lda (0,x)               ; Get count from c-addr
-        inc a                   ; Increment to account for count byte
-        sta _count              ; Save count
-        stz _count+1            ; Zero out high byte of tmp
-
-        stx _sp                 ; Save stack pointer
-        ldx dict_head           ; x points to the dict entry
-
-        ;; Compare word to dict entry's word.
-_loop
-        stx _ep                 ; Save dict entry pointer
-
-        ;; Compare count bytes (we need to mask out the control bits).
-        lda 0,x                 ; load count byte from entry
-        bit #smudge             ; test smudge bit
-        bne _nomatch            ; if smudge bit set, ignore entry
-        and #noctrl             ; ignore control bits
-        cmp (_wp)               ; compare with count from word
-        bne _nomatch            ; break if not equal (no match)
-        inx                     ; go to next char in dict entry
-
-        ldy #1                  ; Y indexes to the start of word, past
-                                ; count byte
-
-        ;; Check if the dict entry name matches the current word.
-_test_entry
-        ;; On each iteration, compare current character in the word
-        ;; with the corresponding character in the dict entry.  If not
-        ;; equal, break (no match).  Increment Y and if y >= count,
-        ;; found a match.
-        lda (_wp),y             ; load current char in word
-        cmp 0,x                 ; compare with char in dict entry
-        bne _nomatch            ; break if not equal (no match)
-        inx                     ; go to next char in dict entry
-        iny                     ; go to next char in word
-        cpy _count
-        bmi _test_entry         ; if y < count, repeat
-
-_match
-        ;; We found a match.  Push return values on stack and return.
-        inx
-        inx                     ; x now points to xt
-        txy                     ; y points to xt
-        ldx _sp                 ; restore sp to x
-        sty 0,x                 ; replace c-addr with xt
-
-        ldy #1
-        lda (_ep)               ; check count byte of array
-        bit #precedence         ; check precedence flag
-        bne _imm                ; if set, push 1 instead of -1
-        ldy #-1                 ; set y to -1
-_imm    dex
-        dex
-        sty 0,x                 ; push 1 or -1 to stack
-
-        rep #FLAGM
-        .al
-        rts
-
-_nomatch
-        ;; The word didn't match the dictionary entry, so go to the
-        ;; next one.
-        .as
-        rep #FLAGM
-        .al
-        lda (_ep)               ; a gets count byte of entry
-        and #noctrl             ; clear high byte and control bits
-        inc a                   ; account for count byte
-        tay                     ; y gets count
-        lda (_ep),y             ; a gets dict-entry at offset count
-                                ; (lf field)
-        sep #FLAGM
-        .as
-        tax                     ; x gets lf field
-        ;; If dict entry's link is empty, we're at the end of the
-        ;; dictionary and didn't find a match, so return.  Otherwise
-        ;; try again with the next entry.
-        bne _loop
-
-        ;; No match found.  Push 0 and return.
-        rep #FLAGM
-        .al
-        ldx _sp                 ; restore sp to x
-        dex
-        dex
-        stz 0,x                 ; push 0
-
-        rts
-
-
 ;;; HERE ( -- addr ) Return the next available address in the
 ;;; dictionary.
         .entry here, "HERE"
@@ -1054,60 +1496,6 @@ _nomatch
         dex
         lda cp_v
         sta 0,x
-        rts
-
-
-;;; INTERPRET ( -- ? ) Interpret or compile a line of code.
-        ;; BEGIN  BL WORD DUP COUNT  WHILE
-        ;;    DROP FIND ?DUP  IF
-        ;;       STATE @  IF
-        ;;          0>  IF  EXECUTE  ELSE  COMPILE,  THEN
-        ;;       ELSE
-        ;;          DROP EXECUTE
-        ;;       THEN
-        ;;    ELSE
-        ;;       COUNT NUMBER
-        ;;       STATE @  IF  LITERAL  THEN
-        ;;    THEN
-        ;; AGAIN
-        ;; DROP DROP ;
-        .entry interpret, "INTERPRET"
-_loop   jsr bl.body
-        jsr word.body
-        jsr dup.body
-        jsr count.body
-        jsr zero_branch.body
-        .word _end
-        jsr drop.body
-        jsr find.body
-        jsr question_dup.body
-        jsr zero_branch.body
-        .word _else1
-        jsr state.body
-        jsr fetch.body
-        jsr zero_branch.body
-        .word _else2
-        jsr zero_greater_than.body
-        jsr zero_branch.body
-        .word _else3
-        jsr execute.body
-        jmp _then3
-_else3  jsr compile_comma.body
-_then3  jmp _then2
-_else2  jsr drop.body
-        jsr execute.body
-_then2  jmp _then1
-_else1  jsr count.body
-        jsr number.body
-        jsr state.body
-        jsr fetch.body
-        jsr zero_branch.body
-        .word _then4
-        jsr literal.body
-_then4
-_then1  jmp _loop
-_end    jsr drop.body
-        jsr drop.body
         rts
 
 
@@ -1132,14 +1520,6 @@ _end    jsr drop.body
         .word 0
         jsr state.body
         jsr store.body
-        rts
-
-
-;;; LATEST ( -- addr ) Return a cell containing the address of the
-;;; latest dictionary entry.
-        .entry latest, "LATEST"
-        jsr lit.body
-        .word dict_head
         rts
 
 
@@ -1287,68 +1667,6 @@ _error
 _err_msg .null "Could not find word in dictionary"
 
 
-;;; PARSE <text> Parse a string up until the next occurrence of the
-;;; given delimiter and return the address and length.
-        ;; : PARSE  ( char -- addr n )
-        ;;    >R                \ save char to return stack
-        ;;    >IN @             \ start with current value of >IN
-        ;;    \ increment value on stack until delimeter found
-        ;;    BEGIN  DUP TIB + C@ R@ <>  WHILE  1+  REPEAT
-        ;;    R> DROP           \ no need for char now
-        ;;    DUP >IN @ - >R    \ save n on return stack
-        ;;    >IN @ TIB + >R    \ save addr on return stack
-        ;;    1+ >IN !          \ update >IN
-        ;;    R> R>             \ get n and addr from return stack
-        ;; ;
-        .entry parse, "PARSE"
-        jsr to_r.body
-        jsr toin.body
-        jsr fetch.body
-_begin  jsr dup.body
-        jsr lit.body
-        .word tib
-        jsr plus.body
-        jsr c_fetch.body
-        jsr r_fetch.body
-        jsr not_equal.body
-        jsr zero_branch.body
-        .word _after
-        jsr one_plus.body
-        jmp _begin
-_after  jsr r_from.body
-        jsr drop.body
-        jsr dup.body
-        jsr toin.body
-        jsr fetch.body
-        jsr minus.body
-        jsr to_r.body
-        jsr toin.body
-        jsr fetch.body
-        jsr lit.body
-        .word tib
-        jsr plus.body
-        jsr to_r.body
-        jsr one_plus.body
-        jsr toin.body
-        jsr store.body
-        jsr r_from.body
-        jsr r_from.body
-        rts
-
-
-;;; +! ( x addr -- ) Adds x to the current value of the cell at addr.
-        .entry plus_store, "+!"
-        lda 2,x
-        clc
-        adc (0,x)
-        sta (0,x)
-        txa
-        clc
-        adc #4
-        tax
-        rts
-
-
 ;;; POSTPONE <name> Append the compilation behavior of name to
 ;;; the current definition.
         ;; : POSTPONE ( -- )
@@ -1381,40 +1699,6 @@ _else2  jsr literal.body
 _then2  jmp _then1
 _else1  jsr quit.body
 _then1  rts
-
-
-;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
-;;; and interpret a line of code.
-        .entry quit, "QUIT"
-        ;; Clear return and data stacks.
-        ldx #init_psp
-        lda #init_rsp
-        tcs
-        ;; Set STATE to interpretation.
-        jsr left_bracket.body
-
-        sep #FLAGM
-        jsl SEND_CR
-        rep #FLAGM
-
-_loop
-        jsr refill.body
-        jsr interpret.body
-        jsr state.body
-        jsr fetch.body
-        jsr zero_branch.body
-        .word _print_ok
-        jsr lit.body
-        .word _comp
-        jmp _type
-_print_ok
-        jsr lit.body
-        .word _ok
-_type   jsr typen.body
-        jmp _loop
-
-_ok     .null " ok", $0D
-_comp   .null " compiled", $0D
 
 
 ;;; REFILL ( -- ) Get a line of characters and store it in the TIB,
@@ -1489,17 +1773,6 @@ _fin    stx n_tib
 _val    .word 0
 
 
-;;; ! ( x addr -- ) Stores x into the cell at addr.
-        .entry store, "!"
-        lda 2,x
-        sta (0,x)
-        txa
-        clc
-        adc #4
-        tax
-        rts
-
-
 ;;; TYPE ( c-addr u -- ) If u is greater than zero, display the
 ;;; character string specified by c-addr and u.
         ;; : TYPE   0 ?DO  DUP C@ EMIT 1+  LOOP  DROP ;
@@ -1548,70 +1821,6 @@ _end    jsr drop.body
         ldx tmp                 ; restore stack pointer
         inx
         inx                     ; pop addr
-        rts
-
-
-;;; >IN ( -- addr ) Return the address of a cell that contains the
-;;; current offset into TIB.
-        .entry toin, ">IN"
-        jsr lit.body
-        .word toin_v
-        rts
-
-
-;;; WORD ( char -- addr ) Parse a word delimited by char from the
-;;; input stream, skipping initial occurrences of char, and store the
-;;; parsed word as a counted string in the dictionary, returning the
-;;; location of the word as addr.
-        .entry word, "WORD"
-        stx tmp                 ; save sp in tmp
-        lda 0,x
-        sta tmp+2               ; store delim in tmp+2
-
-        ldy #0                  ; y is length of word
-        ldx toin_v              ; x gets next index to check.
-        dex
-
-        sep #FLAGM
-        .as
-
-        ;; Skip delims until the start of the word.
-_skip_delims
-        inx
-        cpx n_tib
-        beq _finish             ; If end of input, stop
-        lda TIB,x               ; Load the current char into A
-        cmp tmp+2               ; Compare with delimiter
-        beq _skip_delims        ; If delim, repeat
-
-        ;; Copy word into cp until delim is reached.
-_grab_word
-        iny                     ; Go to next char in output buffer
-        sta (cp_v),y            ; Store character into cp_v at offset
-                                ; y
-        inx
-        cpx n_tib
-        beq _finish             ; If end of input, found whole word
-        lda TIB,x               ; Get next character
-        cmp tmp+2               ; Compare with delimiter
-        bne _grab_word          ; If delim, found whole word, else loop
-        inx                     ; Move past delim if present
-
-        ;; Write the length of the word into the first char and
-        ;; return.
-_finish
-        tya
-        and #$EF                ; clear msb
-        sta (cp_v)              ; Store length into first char.
-
-        stx toin_v              ; Update toin
-        ldx tmp                 ; restore sp into x
-
-        rep #FLAGM
-        .al
-        lda cp_v
-        sta 0,x                 ; Put cp_v on stack.
-
         rts
 
 
