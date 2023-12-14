@@ -878,44 +878,39 @@ _less   lda #-1
         rts
 
 
-;;; =STRING ( addr1 addr2 u -- flag ) Compare the two strings at addr1
-;;; and addr2, both of length u, and return flag, which is true if the
+;;; =STRING ( addr1 addr2 n -- flag ) Compare the two strings at addr1
+;;; and addr2, both of length n, and return flag, which is true if the
 ;;; strings are equal and false if not
         .entry equal_string, "=STRING"
-        ;; : =STRING
-        ;;    0 DO   ( addr1 addr2 ) ( R: u 0 )
-        ;;       2DUP C@ SWAP C@   ( addr1 addr2 c2 c1 )
-        ;;       <>  IF  2DROP 0 UNLOOP EXIT  THEN   ( addr1 addr2 )
-        ;;       1+ SWAP 1+   ( addr2' addr1' )
-        ;;    LOOP
-        ;;    2DROP -1 ;
-        jsr lit.body
-        .word 0
-_do     jsr two_to_r.body
-        jsr two_dup.body
-        jsr c_fetch.body
-        jsr swap.body
-        jsr c_fetch.body
-        jsr not_equal.body
-        jsr zero_branch.body
-        .word _then
-        jsr two_drop.body
-        jsr lit.body
-        .word 0
-        jsr unloop.body
+_str1   = tmp
+_str2   = tmp+2
+        lda 4,x
+        sta _str1
+        lda 2,x
+        sta _str2
+        ldy 0,x
+        inx
+        inx
+        inx
+        inx
+        dey
+        sep #FLAGM
+        .as
+_loop   lda (_str1),y
+        cmp (_str2),y
+        bne _not_equal
+_test   dey
+        bpl _loop
+        ;; If fell out of loop, flag is -1.
+        rep #FLAGM
+        .al
+        lda #-1
+        sta 0,x
         rts
-_then   jsr one_plus.body
-        jsr swap.body
-        jsr one_plus.body
-        jsr two_r_from.body
-        jsr one_plus.body
-        jsr loop_runtime.body
-        jsr zero_branch.body
-        .word _do
-        jsr two_drop.body
-        jsr two_drop.body
-        jsr lit.body
-        .sint -1
+_not_equal
+        ;; If branched to here, flag is 0.
+        rep #FLAGM
+        stz 0,x
         rts
 
 
@@ -1210,100 +1205,74 @@ _end    jsr drop.body
         rts
 
 
-;;; SCAN-WHILE ( addr1 n1 x xt -- addr2 n2 ) Move the string pointed to
-;;; by addr1 n1 until the predicate xt ( char x -- ) with argument x
-;;; fails on a character of the string.
-        ;; : SCAN-WHILE
-        ;;    2>R   ( addr1 n1 ) ( R: x xt )
-        ;;    BEGIN
-        ;;       DUP  WHILE
-        ;;       OVER C@ 2R@ EXECUTE  WHILE
-        ;;       1 /STRING
-        ;;    REPEAT  THEN
-        ;;    2R> 2DROP ;
-        .entry scan_while, "SCAN-WHILE"
-        jsr two_to_r.body
-_begin  jsr dup.body
-        jsr zero_branch.body
-        .word _end
-        jsr over.body
-        jsr c_fetch.body
-        jsr two_r_fetch.body
-        jsr execute.body
-        jsr zero_branch.body
-        .word _end
-        jsr lit.body
-        .sint 1
-        jsr slash_string.body
-        jmp _begin
-_end    jsr two_r_from.body
-        jsr two_drop.body
-        rts
-
-
-;;; PARSE <text> Parse a string up until the next occurrence of the
-;;; given delimiter and return the address and length.
-        ;; : PARSE  ( char -- addr n )
-        ;;    \ get source and save starting address
-        ;;    SOURCE >IN @ /STRING OVER >R   ( char start len R: start )
-        ;;    \ scan while not delimiter
-        ;;    ROT ['] <> SCAN-WHILE   ( end rest R: start )
-        ;;    \ get address of character after word, skip delim if necessary
-        ;;    2DUP 0<> -   ( end rest after R: start )
-        ;;    \ update >IN to offset of after from source
-        ;;    SOURCE DROP - >IN !   ( end rest R: start )
-        ;;    \ calculate addr and length
-        ;;    DROP R> TUCK - ;
+;;; PARSE ( <text> char -- addr n ) Parse a string up until the next
+;;; occurrence of the given delimiter and return the address and
+;;; length.
         .entry parse, "PARSE"
-        jsr source.body
-        jsr toin.body
-        jsr fetch.body
-        jsr slash_string.body
-        jsr over.body
-        jsr to_r.body
-        jsr rot.body
-        jsr lit.body
-        .word not_equal.body
-        jsr scan_while.body
-        jsr two_dup.body
-        jsr zero_not_equal.body
-        jsr minus.body
-        jsr source.body
-        jsr drop.body
-        jsr minus.body
-        jsr toin.body
-        jsr store.body
-        jsr drop.body
-        jsr r_from.body
-        jsr tuck.body
-        jsr minus.body
+_src    = tmp
+_savey  = tmp+2
+_char   = tmp+4
+        lda 0,x                 ; load char
+        sta _char               ; save char
+        lda s_addr              ; load source address
+        sta _src                ; save source address
+        ldy toin_v              ; load >IN value to y
+        sty _savey              ; save y
+        clc
+        adc _savey
+        sta 0,x                 ; store _src+y on stack
+        dey
+        sep #FLAGM              ; 8-bit memory mode
+        .as
+_parseloop
+        iny                     ; go to next char in source
+        cpy n_tib
+        bge _parseend           ; if last char in source, stop
+        lda (_src),y            ; read current character
+        cmp _char
+        bne _parseloop          ; if char has not been reached, loop
+        iny                     ; go to character after char
+        sty toin_v              ; store in >IN
+        dey                     ; go back
+        bra _n                  ; don't store y in >IN again
+_parseend
+        sty toin_v              ; store last index into >IN
+_n
+        rep #FLAGM              ; back to 16-bit memory mode
+        .al
+        dex
+        dex
+        tya
+        sec
+        sbc tmp+2
+        sta 0,x                 ; push current value of y minus old
+                                ; value of y onto stack
         rts
 
 
-;;; PARSE-NAME <text> Parse a space-separated name and return the
-;;; address and length.
-        ;; : PARSE-NAME  ( -- addr n )
-        ;;    \ find next non-space char in source
-        ;;    SOURCE >IN @ /STRING BL ['] = SCAN-WHILE DROP   ( next )
-        ;;    \ update >IN to offset of next from source
-        ;;    SOURCE DROP - >IN !   ( )
-        ;;    \ parse a space separated word
-        ;;    BL PARSE ;
+;;; PARSE-NAME ( <text> -- addr n ) Parse a space-separated name and
+;;; return the address and length.
         .entry parse_name, "PARSE-NAME"
-        jsr source.body
-        jsr toin.body
-        jsr fetch.body
-        jsr slash_string.body
-        jsr bl.body
-        jsr lit.body
-        .word equal.body
-        jsr scan_while.body
-        jsr drop.body
-        jsr source.body
-        jsr drop.body
-        jsr minus.body
-        jsr toin.body
-        jsr store.body
+        ;; Look for first character in string != ' '
+        lda s_addr
+        sta tmp
+        ldy toin_v
+        dey
+        sep #FLAGM
+        .as
+_skipspaceloop
+        iny
+        cpy n_tib
+        bge _skipspaceend
+        lda (tmp),y
+        cmp #' '
+        beq _skipspaceloop
+_skipspaceend
+        rep #FLAGM
+        .al
+        sty toin_v              ; Update >IN so PARSE knows where to
+                                ; start
+        ;; Call PARSE to finish the job.
         jsr bl.body
         jsr parse.body
         rts
