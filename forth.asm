@@ -531,6 +531,21 @@ _end    jsr drop.body
         rts
 
 
+;;; IMMEDIATE ( -- ) Mark the most recently defined word as immediate.
+        ;; : IMMEDIATE    LATEST @ C@ 0x80 OR LATEST @ C! ;
+        .entry immediate, "IMMEDIATE"
+        jsr latest.body
+        jsr fetch.body
+        jsr c_fetch.body
+        jsr lit.body
+        .word $80               ; set precedence bit
+        jsr or.body
+        jsr latest.body
+        jsr fetch.body
+        jsr c_store.body
+        rts
+
+
 ;;; [ ( -- ) Enter interpretation state; [ is an immediate word.
         .entry left_bracket, "[", true
         jsr lit.body
@@ -726,6 +741,40 @@ _err_msg .null "Could not find word in dictionary"
         rts
 
 
+;;; POSTPONE <name> Append the compilation behavior of name to
+;;; the current definition.
+        ;; : POSTPONE ( -- )
+        ;;    BL WORD FIND DUP  IF
+        ;;       0>  IF \ name is immediate
+        ;;          COMPILE,
+        ;;       ELSE \ name is not immediate
+        ;;          LITERAL ['] COMPILE, COMPILE,
+        ;;       THEN
+        ;;    ELSE
+        ;;       QUIT
+        ;;    THEN
+        ;; ; IMMEDIATE
+        .entry postpone, "POSTPONE", true
+        jsr bl.body
+        jsr word.body
+        jsr find.body
+        jsr dup.body
+        jsr zero_branch.body
+        .word _else1
+        jsr zero_greater_than.body
+        jsr zero_branch.body
+        .word _else2
+        jsr compile_comma.body
+        jmp _then2
+_else2  jsr literal.body
+        jsr lit.body
+        .word compile_comma.body
+        jsr compile_comma.body
+_then2  jmp _then1
+_else1  jsr quit.body
+_then1  rts
+
+
 ;;; ?DUP ( x -- 0 | x x )
         .entry question_dup, "?DUP"
         lda 0,x
@@ -813,7 +862,7 @@ _fin    stx n_tib
 
 ;;; ; ( -- ) End the current colon definition, make it visible, and
 ;;; ; return to the interpretation state. ; is an immediate word.
-        ;; : ;   0x60 C, LATEST @ C@ 0xBF AND LATEST @ C! [
+        ;; : ;   0x60 C, LATEST @ C@ 0xBF AND LATEST @ C! [ ;
         .entry semicolon, ";", true
         jsr lit.body
         .word $60               ; opcode for RTS
@@ -822,7 +871,7 @@ _fin    stx n_tib
         jsr fetch.body
         jsr c_fetch.body
         jsr lit.body
-        .word $BF
+        .word $BF               ; clear smudge bit
         jsr and_.body
         jsr latest.body
         jsr fetch.body
