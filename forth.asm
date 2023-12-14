@@ -1107,7 +1107,7 @@ dict_head .word 0
         ;;       KEY DUP 13 <>   ( tib addr char flag )
         ;;    WHILE   ( tib addr char )
         ;;       DUP EMIT DUP 8 =   ( tib addr char flag )
-        ;;       IF  DROP 1-  ELSE  OVER ! 1+  THEN   ( tib addr' )
+        ;;       IF  DROP 1- TIB MAX  ELSE  OVER ! 1+  THEN   ( tib addr' )
         ;;    REPEAT   ( tib addr char )
         ;;    DROP OVER - (SOURCE) 2! ( )
         ;;    0 >IN ! ;
@@ -1132,6 +1132,9 @@ _begin  jsr key.body
         .word _else
         jsr drop.body
         jsr one_minus.body
+        jsr lit.body
+        .word tib
+        jsr max.body
         jmp _then
 _else   jsr over.body
         jsr store.body
