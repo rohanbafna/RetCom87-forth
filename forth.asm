@@ -14,7 +14,7 @@ noctrl  = $1F                   ; no control bits bitmask
 ;;; Direct page variables
 *       = $C0
 dict_head .word ?               ; Pointer to the latest entry in dict
-cp      .word ?                 ; Pointer to the next cell in dict
+cp_v    .word ?                 ; Pointer to the next cell in dict
 toin_v  .word ?                 ; Current offset into TIB.
 n_tib   .word ?                 ; Number of characters in TIB.
 tmp                             ; Temporary storage
@@ -51,6 +51,16 @@ entry   .segment name, word, immediate=false
 last_entry := \name
 \name.body
         .endsegment
+
+
+;;; AND ( x1 x2 -- x3 ) x3 is the bitwise and of x1 and x2.
+        .entry and_, "AND"
+        lda 0,x
+        and 2,x
+        sta 2,x
+        inx
+        inx
+        rts
 
 
 ;;; BL ( -- c ) Push an ASCII space onto the stack.
@@ -91,10 +101,101 @@ last_entry := \name
         rts                     ; Return to that address
 
 
-;;; BREAK ( -- ) Causes a software interrupt (return to monitor)
+;;; BREAK ( -- ) Cause a software interrupt (return to monitor)
         .entry break, "BREAK"
         brk
         .byte $00
+        rts
+
+
+;;; C, ( char -- ) Reserve a byte of data space and store char in that
+;;; byte.
+        .entry c_comma, "C,"
+        lda 0,x
+        sep #FLAGM
+        .as
+        sta (cp_v)
+        rep #FLAGM
+        .al
+        inc cp_v
+        inx
+        inx
+        rts
+
+
+;;; C@ ( addr -- char ) Fetch the character at addr.
+        .entry c_fetch, "C@"
+        lda (0,x)
+        and #$FF
+        sta 0,x
+        rts
+
+
+;;; C! ( c addr -- ) Store c at addr.
+        .entry c_store, "C!"
+        sep #FLAGM
+        .as
+        lda 2,x
+        sta (0,x)
+        rep #FLAGM
+        .al
+        inx
+        inx
+        inx
+        inx
+        rts
+
+
+;;; : <name> ( -- ) Create a colon definition and enter compilation
+;;; state.
+        ;; \ Create definition stub.
+        ;; BL WORD COUNT DUP smudge OR C, CP +! \ name field
+        ;; LATEST @ , \ link field
+        ;; 1- LATEST ! \ update latest with address of new word
+        ;; \ Enter compilation mode.
+        ;; ]
+        .entry colon, ":"
+        jsr bl.body
+        jsr word.body
+        jsr count.body
+        jsr dup.body
+        jsr lit.body
+        .word smudge
+        jsr or.body
+        jsr c_comma.body
+        jsr cp.body
+        jsr plus_store.body
+        jsr latest.body
+        jsr fetch.body
+        jsr comma.body
+        jsr one_minus.body
+        jsr latest.body
+        jsr store.body
+        jsr right_bracket.body
+        rts
+
+
+;;; , ( x -- ) Reserve a cell of data space and store x in that cell.
+        .entry comma, ","
+        lda 0,x
+        sta (cp_v)
+        lda cp_v
+        inc a
+        inc a
+        sta cp_v
+        inx
+        inx
+        rts
+
+
+;;; COMPILE, ( xt -- ) Append the execution behavior of the
+;;; definition represented by xt to the current definition.
+        .entry compile_comma, "COMPILE,"
+        jsr lit.body
+        .word $20               ; opcode for JSR with absolute
+                                ; addressing
+        jsr c_comma.body
+        jsr comma.body
         rts
 
 
@@ -107,6 +208,13 @@ last_entry := \name
         dex
         dex
         sta 0,x                 ; Push count to stack
+        rts
+
+
+;;; CP ( -- addr ) Return the address of CP.
+        .entry cp, "CP"
+        jsr lit.body
+        .word cp_v
         rts
 
 
@@ -359,11 +467,30 @@ _nomatch
         rts
 
 
-;;; INTERPRET ( -- ? ) Interpret a line of code.
+;;; HERE ( -- addr ) Return the next available address in the
+;;; dictionary.
+        .entry here, "HERE"
+        dex
+        dex
+        lda cp_v
+        sta 0,x
+        rts
+
+
+;;; INTERPRET ( -- ? ) Interpret or compile a line of code.
         ;; BEGIN  BL WORD DUP COUNT  WHILE
-        ;;    DROP FIND  IF  EXECUTE  ELSE  COUNT NUMBER  THEN
+        ;;    DROP FIND ?DUP  IF
+        ;;       STATE @  IF
+        ;;          0>  IF  EXECUTE  ELSE  COMPILE,  THEN
+        ;;       ELSE
+        ;;          DROP EXECUTE
+        ;;       THEN
+        ;;    ELSE
+        ;;       COUNT NUMBER
+        ;;       STATE @  IF  LITERAL  THEN
+        ;;    THEN
         ;; AGAIN
-        ;; DROP DROP
+        ;; DROP DROP ;
         .entry interpret, "INTERPRET"
 _loop   jsr bl.body
         jsr word.body
@@ -373,15 +500,51 @@ _loop   jsr bl.body
         .word _end
         jsr drop.body
         jsr find.body
+        jsr question_dup.body
         jsr zero_branch.body
-        .word _else
+        .word _else1
+        jsr state.body
+        jsr fetch.body
+        jsr zero_branch.body
+        .word _else2
+        jsr zero_greater_than.body
+        jsr zero_branch.body
+        .word _else3
         jsr execute.body
-        jmp _then
-_else   jsr count.body
+        jmp _then3
+_else3  jsr compile_comma.body
+_then3  jmp _then2
+_else2  jsr drop.body
+        jsr execute.body
+_then2  jmp _then1
+_else1  jsr count.body
         jsr number.body
-_then   jmp _loop
+        jsr state.body
+        jsr fetch.body
+        jsr zero_branch.body
+        .word _then4
+        jsr literal.body
+_then4
+_then1  jmp _loop
 _end    jsr drop.body
         jsr drop.body
+        rts
+
+
+;;; [ ( -- ) Enter interpretation state; [ is an immediate word.
+        .entry left_bracket, "[", true
+        jsr lit.body
+        .word 0
+        jsr state.body
+        jsr store.body
+        rts
+
+
+;;; LATEST ( -- addr ) Return a cell containing the address of the
+;;; latest dictionary entry.
+        .entry latest, "LATEST"
+        jsr lit.body
+        .word dict_head
         rts
 
 
@@ -396,6 +559,15 @@ _end    jsr drop.body
         sta 0,x
         iny
         phy                     ; point return address to cell after
+        rts
+
+
+;;; LITERAL ( x -- ) At runtime, push x onto the stack.
+        .entry literal, "LITERAL"
+        jsr lit.body
+        .word lit.body
+        jsr compile_comma.body
+        jsr comma.body
         rts
 
 
@@ -514,6 +686,22 @@ _error
 _err_msg .null "Could not find word in dictionary"
 
 
+;;; 1- ( n1 -- n2 ) n2 is n1 - 1.
+        .entry one_minus, "1-"
+        dec 0,x
+        rts
+
+
+;;; OR ( x1 x2 -- x3 ) x3 is the bitwise inclusive or of x1 and x2.
+        .entry or, "OR"
+        lda 0,x
+        ora 2,x
+        sta 2,x
+        inx
+        inx
+        rts
+
+
 ;;; + ( n1 n2 -- n3 ) Adds n1 to n2 to get n3.
         .entry plus, "+"
         lda 0,x                 ; a := n2
@@ -522,6 +710,19 @@ _err_msg .null "Could not find word in dictionary"
         sta 2,x                 ; n3 := a
         inx
         inx                     ; pop n2 off stack
+        rts
+
+
+;;; +! ( x addr -- ) Adds x to the current value of the cell at addr.
+        .entry plus_store, "+!"
+        lda 2,x
+        clc
+        adc (0,x)
+        sta (0,x)
+        txa
+        clc
+        adc #4
+        tax
         rts
 
 
@@ -538,10 +739,12 @@ _return rts
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
 ;;; and interpret a line of code.
         .entry quit, "QUIT"
-        ;; Clear return and data stacks
+        ;; Clear return and data stacks.
         ldx #init_psp
         lda #init_rsp
         tcs
+        ;; Set STATE to interpretation.
+        jsr left_bracket.body
 
         sep #FLAGM
         jsl SEND_CR
@@ -550,12 +753,21 @@ _return rts
 _loop
         jsr refill.body
         jsr interpret.body
+        jsr state.body
+        jsr fetch.body
+        jsr zero_branch.body
+        .word _print_ok
+        jsr lit.body
+        .word _comp
+        jmp _type
+_print_ok
         jsr lit.body
         .word _ok
-        jsr typen.body
+_type   jsr typen.body
         jmp _loop
 
 _ok     .null " ok", $0D
+_comp   .null " compiled", $0D
 
 
 ;;; REFILL ( -- ) Get a line of characters and store it in the TIB,
@@ -587,6 +799,35 @@ _fin    stx n_tib
         ;; Clear >IN.
         stz toin_v
 
+        rts
+
+
+;;; ] ( -- ) Enter compilation state.
+        .entry right_bracket, "]"
+        jsr lit.body
+        .sint -1
+        jsr state.body
+        jsr store.body
+        rts
+
+
+;;; ; ( -- ) End the current colon definition, make it visible, and
+;;; ; return to the interpretation state. ; is an immediate word.
+        ;; : ;   0x60 C, LATEST @ C@ 0xBF AND LATEST @ C! [
+        .entry semicolon, ";", true
+        jsr lit.body
+        .word $60               ; opcode for RTS
+        jsr c_comma.body
+        jsr latest.body
+        jsr fetch.body
+        jsr c_fetch.body
+        jsr lit.body
+        .word $BF
+        jsr and_.body
+        jsr latest.body
+        jsr fetch.body
+        jsr c_store.body
+        jsr left_bracket.body
         rts
 
 
@@ -679,6 +920,28 @@ _no_neg_quotient
         rts
 
 
+;;; STATE ( -- addr ) Returns the address of the STATE variable (flag
+;;; that is true on compilation and false on interpretation).
+        .entry state, "STATE"
+        dex
+        dex
+        ldy #_val
+        sty 0,x
+        rts
+_val    .word 0
+
+
+;;; ! ( x addr -- ) Stores x into the cell at addr.
+        .entry store, "!"
+        lda 2,x
+        sta (0,x)
+        txa
+        clc
+        adc #4
+        tax
+        rts
+
+
 ;;; SWAP ( x1 x2 -- x2 x1 )
         .entry swap, "SWAP"
         lda 0,x
@@ -702,17 +965,6 @@ _no_neg_quotient
         ldx tmp                 ; restore stack pointer
         inx
         inx                     ; pop addr
-        rts
-
-
-;;; ! ( x addr -- ) Stores x into the cell at addr.
-        .entry store, "!"
-        lda 2,x
-        sta (0,x)
-        txa
-        clc
-        adc #4
-        tax
         rts
 
 
@@ -752,7 +1004,8 @@ _skip_delims
         ;; Copy word into cp until delim is reached.
 _grab_word
         iny                     ; Go to next char in output buffer
-        sta (cp),y              ; Store character into cp at offset y
+        sta (cp_v),y            ; Store character into cp_v at offset
+                                ; y
         inx
         cpx n_tib
         beq _finish             ; If end of input, found whole word
@@ -765,15 +1018,15 @@ _grab_word
 _finish
         tya
         and #$EF                ; clear msb
-        sta (cp)                ; Store length into first char.
+        sta (cp_v)              ; Store length into first char.
 
         stx toin_v              ; Update toin
         ldx tmp                 ; restore sp into x
 
         rep #FLAGM
         .al
-        lda cp
-        sta 0,x                 ; Put cp on stack.
+        lda cp_v
+        sta 0,x                 ; Put cp_v on stack.
 
         rts
 
@@ -800,8 +1053,15 @@ _true   lda #-1
         rts
 
 
+;;; 0> ( n -- flag ) Return true when n > 0.
+        .entry zero_greater_than, "0>"
+        jsr negate.body
+        jsr zero_less_than.body ; inefficient, but easy
+        rts
+
+
 cp_val  = *
-*       = cp
+*       = cp_v
         .word cp_val            ; Fill default code pointer
 
 *       = dict_head
