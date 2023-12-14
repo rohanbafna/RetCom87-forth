@@ -233,7 +233,7 @@ _nomatch
 
 ;;; INTERPRET ( -- ? ) Interpret a line of code.
         ;; BEGIN  BL WORD DUP COUNT  WHILE
-        ;;    DROP FIND  IF  EXECUTE  ELSE  DROP  THEN
+        ;;    DROP FIND  IF  EXECUTE  ELSE  COUNT NUMBER  THEN
         ;; AGAIN
         ;; DROP DROP
         .entry interpret, "INTERPRET"
@@ -246,8 +246,11 @@ _loop   jsr bl.body
         jsr drop.body
         jsr find.body
         jsr zero_branch.body
-        .word _then
+        .word _else
         jsr execute.body
+        jmp _then
+_else   jsr count.body
+        jsr number.body
 _then   jmp _loop
 _end    jsr drop.body
         jsr drop.body
@@ -266,6 +269,101 @@ _end    jsr drop.body
         iny
         phy                     ; point return address to cell after
         rts
+
+
+;;; NUMBER ( c-addr u -- n ) Converts the string at c-addr to a
+;;; number.
+        .entry number, "NUMBER"
+_num    = tmp                   ; temporary storage for number
+_neg    = tmp+2                 ; negative flag
+_addr   = tmp+4                 ; address of string
+_count  = tmp+6                 ; count of characters in string
+
+        lda 0,x
+        sta _count              ; _count := u
+        lda 2,x
+        sta _addr               ; _addr := c-addr
+        stz _neg                ; set neg to 0
+        ldy #0                  ; y starts at 0
+
+        sep #FLAGM
+        .as
+        lda (_addr)             ; a gets first character
+        cmp #'-'
+        rep #FLAGM
+        .al
+        beq _set_neg            ; if first char is -, set the neg flag
+
+_after_neg_check
+        lda #0                  ; a starts as 0
+
+_loop
+        ;; Multiply current number by 10.
+        asl
+        sta _num                ; num := old_num*2
+        asl
+        asl                     ; a := old_num*8
+        clc
+        adc _num                ; a := old_num*10
+        sta _num                ; num := old_num*10
+
+        ;; Do bounds checking on the next character.
+        sep #FLAGM
+        .as
+        lda (_addr),y           ; a gets next char
+        cmp #'0'
+        blt _error              ; if a<'0', error
+        cmp #'9'+1
+        bge _error              ; if a>'9', error
+
+        ;; Add current number to next character minus #'0'
+        rep #FLAGM
+        .al
+        and #$FF & ~'0'         ; clear top byte and convert char to
+                                ; a number d
+        adc _num                ; a := num*10 + d
+
+        iny                     ; y gets index of next char
+        cpy _count
+        blt _loop               ; if y<count, go to next digit
+
+        ;; Save num.  If neg is set, negate the parsed number.
+        sta _num                ; save num
+        lda _neg
+        beq _no_neg             ; if neg = 0, don't negate
+
+        lda _num
+        eor #$FFFF
+        inc a
+        sta _num                ; negate num
+
+        ;; Push the parsed number onto the stack.
+_no_neg
+        inx
+        inx                     ; pop c-addr
+        lda _num
+        sta 0,x                 ; replace top of stack with _num
+
+        rts
+
+        ;; Set the neg flag
+_set_neg
+        lda #1
+        sta _neg
+        iny                     ; go to next character
+        bra _after_neg_check
+
+        ;; Signal an error
+_error
+        sep #FLAGM
+        .as
+        lda #0
+        ldx #_err_msg
+        jsl PUT_STR
+        rep #FLAGM
+        .al
+        jmp quit.body
+_err_msg .null "Could not find word in dictionary"
 
 
 ;;; QUIT ( * -- ) Clear the return and data stacks and repeatedly read
