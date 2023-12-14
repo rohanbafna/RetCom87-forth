@@ -8,11 +8,12 @@
 
         ;; Direct page variables
         .org 0xC0
+tmp:    .resb 2                 ; Temporary storage
 lx:     .resb 2                 ; Line index
 nlx:    .resb 2                 ; Next line index
 done:   .resb 1                 ; Nonzero if we've finished line
-tmp:    .resb 2                 ; Temporary storage during parsenum
 neg:    .resb 1                 ; Negative number flag for parsenum
+dicth:  .dw ldicth              ; Dictionary head
 
         ;; Main program
         .org 0x200
@@ -64,10 +65,45 @@ eval:                           ; Evaluate meaning of word.
         stz lbuf,x              ; mark end of word with 0.
         stx nlx                 ; nlx gets next index to search.
 
-        ldy lx
-        lda lbuf,y
-        cmp.b #'!'              ; If first character is !, parse as a
-        beq parsenum            ; number
+        ;; Search dictionary for word.
+        ldx dicth               ; x is a pointer to dict entry
+
+        ;; Compare word to dict entry's word.
+searchloop:
+        ;; If dict entry's word is null, we're at the end of the
+        ;; dictionary and didn't find a match.  Attempt to parse as a
+        ;; number instead.
+        lda 0,x
+        beq parsenum
+        stx tmp                 ; save dict entry pointer
+        ldy lx                  ; y is a pointer to word
+wordcmploop:
+        ;; On each iteration, compare current character in the word
+        ;; with the corresponding character in the dict entry.  If not
+        ;; equal, break (no match) and if equal and one character is
+        ;; 0, break (match).  Else repeat.
+        lda lbuf,y              ; load current char in word
+        cmp 0,x                 ; compare with char in dict entry
+        bne wordcmpfail         ; break if not equal
+        lda 0,x                 ; load char in dict entry
+        beq searchsuccess       ; break if zero
+        inx
+        iny
+        bra wordcmploop         ; repeat
+
+wordcmpfail:
+        ;; The word didn't match the dictionary entry, so go to the
+        ;; next one.
+        rep #FLAGM
+        lda tmp                 ; load saved dict entry pointer
+        clc
+        adc.w #-DICT_ENTRY_SIZE ; get pointer to next entry
+        tax
+        sep #FLAGM
+        bra searchloop
+
+searchsuccess:
+        ;; We found a match.
 
         ;; Print parsed word.
         lda.b #0
@@ -92,7 +128,7 @@ end:
         brk
 
 parsenum:                       ; Parse and print parsed number.
-        iny
+        ldy lx
         lda lbuf,y
         cmp.b #'-'
         beq parsenumsetnegflag
@@ -166,10 +202,33 @@ parsenumerror:
         ldx.w #numerrm
         jsl PUT_STR             ; print numerrm message
 
-        bra repeat
+        jmp repeat
 
         ;; Other variables
 lbuf:   .resb 0x100             ; Line buffer
+
+        ;; Dictionary
+
+        ;; Each entry is formatted as a 0x20 byte name field.  The
+        ;; entries are laid out sequentially, and the address of the
+        ;; latest entry is stored at dicth.  ldicth ("load-time
+        ;; dictionary head") is the latest entry in the dictionary at
+        ;; load time/compile time.
+        .set DICT_ENTRY_SIZE=0x20
+
+        .macro ENTRY(name)
+        .scope
+entry:  .asciiz name
+        .org entry+DICT_ENTRY_SIZE
+        .ends
+        .endm
+
+        ;; Sentinel entry; signals end of dictionary
+        .db 0
+        .resb DICT_ENTRY_SIZE-1
+
+        ENTRY("test")
+ldicth: ENTRY("another")
 
         ;; Strings
 wordm:  .asciiz "Parsed word: "
