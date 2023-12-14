@@ -107,6 +107,28 @@ last_entry := \name
         rts
 
 
+;;; . ( n -- ) Print out n to the screen.
+        ;; TODO: Make this print out in decimal.
+        .entry dot, "."
+        sep #FLAGM
+        .as
+
+        lda 1,x
+        jsl SEND_HEX_OUT        ; print msb
+        lda 0,x
+        jsl SEND_HEX_OUT        ; print lsb
+
+        lda #' '
+        jsl PUT_CHR             ; print space
+
+        rep #FLAGM
+        .al
+
+        inx
+        inx                     ; pop n
+        rts
+
+
 ;;; DROP ( x -- ) Drop one cell from the stack.
         .entry drop, "DROP"
         inx
