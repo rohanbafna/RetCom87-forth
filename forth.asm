@@ -1072,6 +1072,77 @@ dict_head .word 0
         rts
 
 
+;;; --------------------------------
+;;;              I/O
+;;; --------------------------------
+
+;;; EMIT ( char -- ) Prints out char to the screen.
+        .entry emit, "EMIT"
+        lda 0,x
+        sep #FLAGM
+        .as
+        jsl PUT_CHR
+        rep #FLAGM
+        .al
+        inx
+        inx                     ; pop char
+        rts
+
+
+;;; KEY ( -- char ) Wait for keyboard input and return the character
+;;; corresponding to the key pressed.
+        .entry key, "KEY"
+        sep #FLAGM
+        .as
+        jsl GET_CHR
+        rep #FLAGM
+        .al
+        and #$FF
+        dex
+        dex
+        sta 0,x
+        rts
+
+
+;;; REFILL ( -- ) Get a line of characters and store it in the TIB,
+;;; then set >IN to 0.
+        ;; : REFILL
+        ;;    TIB DUP   ( tib addr )
+        ;;    BEGIN   ( tib addr )
+        ;;       KEY DUP 13 <>   ( tib addr char flag )
+        ;;    WHILE   ( tib addr char )
+        ;;       DUP EMIT OVER ! 1+   ( tib addr' )
+        ;;    REPEAT   ( tib addr char )
+        ;;    DROP OVER - (SOURCE) 2! ( )
+        ;;    0 >IN ! ;
+        .entry refill, "REFILL"
+        jsr lit.body
+        .word tib
+        jsr dup.body
+_begin  jsr key.body
+        jsr dup.body
+        jsr lit.body
+        .sint 13
+        jsr not_equal.body
+        jsr zero_branch.body
+        .word _end
+        jsr dup.body
+        jsr emit.body
+        jsr over.body
+        jsr store.body
+        jsr one_plus.body
+        jmp _begin
+_end    jsr drop.body
+        jsr over.body
+        jsr minus.body
+        jsr source_.body
+        jsr two_store.body
+        jsr lit.body
+        .sint 0
+        jsr toin.body
+        jsr store.body
+        rts
+
 
 ;;; --------------------------------
 ;;;          INTERPRETER
@@ -1267,8 +1338,8 @@ _print_ok
 _type   jsr typen.body
         jmp _loop
 
-_ok     .null " ok", $0D
-_comp   .null " compiled", $0D
+_ok     .null "  ok", $0D
+_comp   .null "  compiled", $0D
 
 
 ;;; SOURCE ( -- addr u ) Return the address and length of the input
@@ -1451,6 +1522,8 @@ s_addr  .word tib
 
 
 ;;; . ( n -- ) Print out n to the screen.
+        ;; \ Print a space before the number.
+        ;; BL EMIT
         ;; \ If n is negative, print a - sign.
         ;; DUP <0  IF  NEGATE CHAR - EMIT  THEN
         ;; \ Add a sentinel 0 to the stack, under n.
@@ -1463,10 +1536,10 @@ s_addr  .word tib
         ;; UNTIL
         ;; DROP
         ;; \ Pop the digits of n and print them out.
-        ;; BEGIN  ?DUP  WHILE  EMIT  AGAIN
-        ;; \ Print a space after the number.
-        ;; BL EMIT ;
+        ;; BEGIN  ?DUP  WHILE  EMIT  AGAIN ;
         .entry dot, "."
+        jsr bl.body
+        jsr emit.body
         jsr dup.body
         jsr zero_less_than.body
         jsr zero_branch.body
@@ -1499,10 +1572,7 @@ _begin2
         .word _again
         jsr emit.body
         jmp _begin2
-_again
-        jsr bl.body
-        jsr emit.body
-        rts
+_again  rts
 
 
 ;;; .( ( "ccc<paren>" -- ) Parse and display ccc delimited by ).
@@ -1512,19 +1582,6 @@ _again
         .word $29
         jsr parse.body
         jsr type.body
-        rts
-
-
-;;; EMIT ( char -- ) Prints out char to the screen.
-        .entry emit, "EMIT"
-        lda 0,x
-        sep #FLAGM
-        .as
-        jsl PUT_CHR
-        rep #FLAGM
-        .al
-        inx
-        inx                     ; pop char
         rts
 
 
@@ -1767,41 +1824,6 @@ _else2  jsr literal.body
 _then2  jmp _then1
 _else1  jsr quit.body
 _then1  rts
-
-
-;;; REFILL ( -- ) Get a line of characters and store it in the TIB,
-;;; then set >IN to 0.
-        .entry refill, "REFILL"
-        sep #FLAGM
-        .as
-
-        stx tmp
-        ;; Read line to TIB.
-        lda #0
-        ldx #tib
-        jsl GET_STR
-
-        ;; Count characters in TIB.
-        ldx #0
-_loop   lda tib,x
-        beq _fin
-        cmp #$0D
-        beq _fin
-        inx
-        bra _loop
-
-_fin    stx n_tib
-
-        ldx tmp
-        rep #FLAGM
-        .al
-
-        ;; Clear >IN.
-        stz toin_v
-        lda #tib
-        sta s_addr
-
-        rts
 
 
 ;;; ] ( -- ) Enter compilation state.
