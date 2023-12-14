@@ -1,7 +1,7 @@
 # Path to naken_asm executable
 NAKEN_ASM = naken_asm
 
-programs = parser
+programs = rpn
 
 all : $(programs:%=%.hex)
 

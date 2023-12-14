@@ -1,5 +1,5 @@
 # RetCom87-forth
-FORTH interpreter for RetCom87 (WIP).  Currently just a parser.
+FORTH interpreter for RetCom87 (WIP).  Currently an RPN calculator.
 
 ## Building
 
