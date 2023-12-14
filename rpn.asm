@@ -224,33 +224,6 @@ linebuf:
 stack:
         .resb 0x100             ; Data stack
 
-        ;; Dictionary
-
-        ;; Each entry is formatted as a 0x20 byte name field followed
-        ;; by a 2-byte field for the code address.  The entries are
-        ;; laid out sequentially, and the address of the latest entry
-        ;; is stored at dict_head.  load_dict_head is the latest entry
-        ;; in the dictionary at load time/compile time.
-        .set DICT_ENTRY_SIZE=0x22
-        .set DICT_ENTRY_OFFSET_FUNC=0x20
-
-        .macro ENTRY(name, func)
-        .scope
-entry:  .asciiz name
-        .org entry+DICT_ENTRY_OFFSET_FUNC
-        .dw func
-        .ends
-        .endm
-
-        ;; Sentinel entry; signals end of dictionary
-        .db 0
-        .resb DICT_ENTRY_SIZE-1
-
-        ENTRY("+", add)
-        ENTRY("-", subtract)
-load_dict_head:
-        ENTRY(".", print_num)
-
         ;; Subroutines for each Forth word.  Each subroutine is called
         ;; with JSR and returns with RTS.
 
@@ -318,3 +291,30 @@ subtract:
         ;; Strings
 parse_num_err_msg:
         .asciiz "Error parsing number"
+
+        ;; Dictionary
+
+        ;; Each entry is formatted as a 0x20 byte name field followed
+        ;; by a 2-byte field for the code address.  The entries are
+        ;; laid out sequentially, and the address of the latest entry
+        ;; is stored at dict_head.  load_dict_head is the latest entry
+        ;; in the dictionary at load time/compile time.
+        .set DICT_ENTRY_SIZE=0x22
+        .set DICT_ENTRY_OFFSET_FUNC=0x20
+
+        .macro ENTRY(name, func)
+        .scope
+entry:  .asciiz name
+        .org entry+DICT_ENTRY_OFFSET_FUNC
+        .dw func
+        .ends
+        .endm
+
+        ;; Sentinel entry; signals end of dictionary
+        .db 0
+        .resb DICT_ENTRY_SIZE-1
+
+        ENTRY("+", add)
+        ENTRY("-", subtract)
+load_dict_head:
+        ENTRY(".", print_num)
