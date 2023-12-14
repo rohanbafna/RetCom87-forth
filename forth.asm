@@ -1077,6 +1077,12 @@ dict_head .word 0
 ;;;          INTERPRETER
 ;;; --------------------------------
 
+;;; ABORT ( i * x -- ) ( R: j * x -- ) Empty the data stack and call
+;;; quit.
+        .entry abort, "ABORT"
+        ldx #init_psp
+        jsr quit.body
+
 ;;; BL ( -- c ) Push an ASCII space onto the stack.
         .entry bl, "BL"
         jsr lit.body
@@ -1094,7 +1100,7 @@ dict_head .word 0
         ;;       THEN
         ;;    ELSE
         ;;       NUMBER
-        ;;       STATE @  IF  LITERAL  THEN
+        ;;       STATE @  IF  POSTPONE LITERAL  THEN
         ;;    THEN
         ;; AGAIN
         ;; DROP ;
@@ -1604,7 +1610,7 @@ _true   lda #-1
 
 
 ;;; LITERAL ( x -- ) At runtime, push x onto the stack.
-        .entry literal, "LITERAL"
+        .entry literal, "LITERAL", true
         jsr lit.body
         .word lit.body
         jsr compile_comma.body
@@ -1726,7 +1732,7 @@ _error
         jsl PUT_STR
         rep #FLAGM
         .al
-        jmp quit.body
+        jsr abort.body
 _err_msg .null "Could not find word in dictionary"
 
 
@@ -1737,7 +1743,7 @@ _err_msg .null "Could not find word in dictionary"
         ;;       0>  IF \ name is immediate
         ;;          COMPILE,
         ;;       ELSE \ name is not immediate
-        ;;          LITERAL ['] COMPILE, COMPILE,
+        ;;          POSTPONE LITERAL ['] COMPILE, COMPILE,
         ;;       THEN
         ;;    ELSE
         ;;       QUIT
@@ -1824,6 +1830,25 @@ _fin    stx n_tib
         jsr fetch.body
         jsr c_store.body
         jsr left_bracket.body
+        rts
+
+
+;;; (SLITERAL) ( -- addr u ) Takes the following data in the current
+;;; thread to be a counted string, and pushes the address and length
+;;; onto the stack.
+        .entry sliteral_, "(SLITERAL)"
+        lda 1,s
+        inc a
+        dex
+        dex
+        sta 0,x                 ; push address of counted string onto
+                                ; stack.
+        jsr count.body
+        pla
+        inc a
+        clc
+        adc 0,x
+        pha                     ; increment return address by count+1
         rts
 
 
