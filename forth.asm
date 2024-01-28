@@ -1348,8 +1348,14 @@ _then   jsr nip.body
         ;;       DUP $F0 =  IF
         ;;          DROP EKEY EKEY>MODMASK INVERT  KEYMOD @  AND  KEYMOD !  0
         ;;       THEN
+        ;;       \ if 58 (caps lock) then change modifier bit 2
+        ;;       DUP $58 =  IF  KEYMOD @ 4 XOR  KEYMOD !  THEN
         ;;       \ if either of the shift bits are on, use shift table
         ;;       KEYMOD @ 3 AND  IF  SSCODE  ELSE  SCODE  THEN  + C@
+        ;;       \ if capslock is on and character is a letter, then invert case
+        ;;       DUP $41 $5B WITHIN  OVER $61 123 WITHIN  OR  KEYMOD @ 4 AND  AND  IF
+        ;;          $20 XOR
+        ;;       THEN
         ;;    ?DUP UNTIL ;
         .entry pstwo_key, "PS2KEY"
 _begin  jsr ekey.body
@@ -1381,7 +1387,22 @@ _begin  jsr ekey.body
         jsr lit.body
         .sint 0
 
-_then1  jsr keymod.body
+_then1  jsr dup.body
+        jsr lit.body
+        .word $58
+        jsr equal.body
+        jsr zero_branch.body
+        .word _then3
+
+        jsr keymod.body
+        jsr fetch.body
+        jsr lit.body
+        .word 4
+        jsr xor.body
+        jsr keymod.body
+        jsr store.body
+
+_then3  jsr keymod.body
         jsr fetch.body
         jsr lit.body
         .word 3
@@ -1396,7 +1417,31 @@ _else2  jsr lit.body
 _then2  jsr plus.body
         jsr c_fetch.body
 
-        jsr question_dup.body
+        jsr dup.body
+        jsr lit.body
+        .word $41
+        jsr lit.body
+        .word $5B
+        jsr within.body
+        jsr over.body
+        jsr lit.body
+        .word $61
+        jsr lit.body
+        .word $7B
+        jsr within.body
+        jsr or.body
+        jsr keymod.body
+        jsr fetch.body
+        jsr lit.body
+        .word 4
+        jsr and_.body
+        jsr and_.body
+        jsr zero_branch.body
+        .word _then4
+        jsr lit.body
+        .word $20
+        jsr xor.body
+_then4  jsr question_dup.body
         jsr zero_branch.body
         .word _begin
         rts
