@@ -17,6 +17,7 @@ kblshf  = $01                   ; left shift modifier
 *       = $C0
 cp_v    .word ?                 ; Pointer to the next cell in dict
 toin_v  .word ?                 ; Current offset into TIB.
+vdp_cp  .word ?                 ; Current VDP pos.
 kbstate .byte ?                 ; Current state of keyboard handler
 kbwoff  .byte ?                 ; Write offset of keyboard circular
                                 ; buffer
@@ -62,10 +63,10 @@ tmp                             ; Temporary storage
 
         ;; Enable keyboard interrupt by setting BCR6 to 1 and BCR5 to
         ;; 0.
-        ;; lda BCR
-        ;; ora #BCR6
-        ;; and #~BCR5
-        ;; sta BCR
+        lda BCR
+        ora #BCR6
+        and #~BCR5
+        sta BCR
         rep #FLAGM
         .al
 
@@ -1228,6 +1229,372 @@ dict_head .word 0
 
 
 ;;; --------------------------------
+;;;              VDP
+;;; --------------------------------
+
+;;; VDPREG ( -- x ) Address of the VDP register port.
+vdpreg  = $DFC1
+        .entry vdpreg_, "VDPREG"
+        jsr lit.body
+        .word vdpreg
+        rts
+
+
+;;; VDPDATA ( -- x ) Address of the VDP data port.
+vdpdata = $DFC0
+        .entry vdpdata_, "VDPDATA"
+        jsr lit.body
+        .word vdpdata
+        rts
+
+
+;;; CLEAR-VRAM ( -- ) Clear the VRAM used by text mode.
+        ;; : CLEAR-VRAM
+        ;;    0 VDPREG C!  64 VDPREG C!
+        ;;    3008 0 DO  0 VDPDATA C!  LOOP ;
+        .entry clear_vram, "CLEAR-VRAM"
+        sep #FLAGM
+        .as
+        stz vdpreg
+        lda #64
+        sta vdpreg
+        ldy #3008
+_loop   stz vdpdata
+        nop
+        dey
+        bne _loop
+        rep #FLAGM
+        .al
+        rts
+
+
+;;; LOAD-FONT ( -- ) Load the font into the VRAM's pattern table.
+        ;; : LOAD-FONT  0 VDPREG C!  65 VDPREG C!
+        ;;    FONT 0 DO  DUP C@ VDPDATA C! 1+  LOOP DROP ;
+        .entry load_font, "LOAD-FONT"
+        sep #FLAGM
+        .as
+        stz vdpreg
+        lda #65
+        sta vdpreg
+        ldy #0
+_loop   lda _font,y
+        sta vdpdata
+        iny
+        cpy #_fontend-_font
+        bne _loop
+        rep #FLAGM
+        .al
+        rts
+
+_font   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; $20
+        .byte $20,$20,$20,$20,$20,$00,$20,$00 ; $21
+        .byte $50,$50,$50,$00,$00,$00,$00,$00 ; $22
+        .byte $50,$50,$F8,$50,$F8,$50,$50,$00 ; $23
+        .byte $20,$78,$A0,$70,$28,$F0,$20,$00 ; $24
+        .byte $C0,$C8,$10,$20,$40,$98,$18,$00 ; $25
+        .byte $40,$A0,$A0,$40,$A8,$90,$68,$00 ; $26
+        .byte $20,$20,$20,$00,$00,$00,$00,$00 ; $27
+        .byte $20,$40,$80,$80,$80,$40,$20,$00 ; $28
+        .byte $20,$10,$08,$08,$08,$10,$20,$00 ; $29
+        .byte $20,$A8,$70,$20,$70,$A8,$20,$00 ; $2A
+        .byte $00,$20,$20,$F8,$20,$20,$00,$00 ; $2B
+        .byte $00,$00,$00,$00,$20,$20,$40,$00 ; $2C
+        .byte $00,$00,$00,$F8,$00,$00,$00,$00 ; $2D
+        .byte $00,$00,$00,$00,$00,$00,$20,$00 ; $2E
+        .byte $00,$08,$10,$20,$40,$80,$00,$00 ; $2F
+        .byte $70,$88,$98,$A8,$C8,$88,$70,$00 ; $30
+        .byte $20,$60,$20,$20,$20,$20,$70,$00 ; $31
+        .byte $70,$88,$08,$30,$40,$80,$F8,$00 ; $32
+        .byte $F8,$08,$10,$30,$08,$88,$70,$00 ; $33
+        .byte $10,$30,$50,$90,$F8,$10,$10,$00 ; $34
+        .byte $F8,$80,$F0,$08,$08,$88,$70,$00 ; $35
+        .byte $38,$40,$80,$F0,$88,$88,$70,$00 ; $36
+        .byte $F8,$08,$10,$20,$40,$40,$40,$00 ; $37
+        .byte $70,$88,$88,$70,$88,$88,$70,$00 ; $38
+        .byte $70,$88,$88,$78,$08,$10,$E0,$00 ; $39
+        .byte $00,$00,$20,$00,$20,$00,$00,$00 ; $3A
+        .byte $00,$00,$20,$00,$20,$20,$40,$00 ; $3B
+        .byte $10,$20,$40,$80,$40,$20,$10,$00 ; $3C
+        .byte $00,$00,$F8,$00,$F8,$00,$00,$00 ; $3D
+        .byte $40,$20,$10,$08,$10,$20,$40,$00 ; $3E
+        .byte $70,$88,$10,$20,$20,$00,$20,$00 ; $3F
+        .byte $70,$88,$A8,$B8,$B0,$80,$78,$00 ; $40
+        .byte $20,$50,$88,$88,$F8,$88,$88,$00 ; $41
+        .byte $F0,$88,$88,$F0,$88,$88,$F0,$00 ; $42
+        .byte $70,$88,$80,$80,$80,$88,$70,$00 ; $43
+        .byte $F0,$88,$88,$88,$88,$88,$F0,$00 ; $44
+        .byte $F8,$80,$80,$F0,$80,$80,$F8,$00 ; $45
+        .byte $F8,$80,$80,$F0,$80,$80,$80,$00 ; $46
+        .byte $78,$80,$80,$80,$98,$88,$78,$00 ; $47
+        .byte $88,$88,$88,$F8,$88,$88,$88,$00 ; $48
+        .byte $70,$20,$20,$20,$20,$20,$70,$00 ; $49
+        .byte $08,$08,$08,$08,$08,$88,$70,$00 ; $4A
+        .byte $88,$90,$A0,$C0,$A0,$90,$88,$00 ; $4B
+        .byte $80,$80,$80,$80,$80,$80,$F8,$00 ; $4C
+        .byte $88,$D8,$A8,$A8,$88,$88,$88,$00 ; $4D
+        .byte $88,$88,$C8,$A8,$98,$88,$88,$00 ; $4E
+        .byte $70,$88,$88,$88,$88,$88,$70,$00 ; $4F
+        .byte $F0,$88,$88,$F0,$80,$80,$80,$00 ; $50
+        .byte $70,$88,$88,$88,$A8,$90,$68,$00 ; $51
+        .byte $F0,$88,$88,$F0,$A0,$90,$88,$00 ; $52
+        .byte $70,$88,$80,$70,$08,$88,$70,$00 ; $53
+        .byte $F8,$20,$20,$20,$20,$20,$20,$00 ; $54
+        .byte $88,$88,$88,$88,$88,$88,$70,$00 ; $55
+        .byte $88,$88,$88,$88,$88,$50,$20,$00 ; $56
+        .byte $88,$88,$88,$A8,$A8,$D8,$88,$00 ; $57
+        .byte $88,$88,$50,$20,$50,$88,$88,$00 ; $58
+        .byte $88,$88,$50,$20,$20,$20,$20,$00 ; $59
+        .byte $F8,$08,$10,$20,$40,$80,$F8,$00 ; $5A
+        .byte $F8,$C0,$C0,$C0,$C0,$C0,$F8,$00 ; $5B
+        .byte $00,$80,$40,$20,$10,$08,$00,$00 ; $5C
+        .byte $F8,$18,$18,$18,$18,$18,$F8,$00 ; $5D
+        .byte $00,$00,$20,$50,$88,$00,$00,$00 ; $5E
+        .byte $00,$00,$00,$00,$00,$00,$00,$F8 ; $5F
+        .byte $40,$20,$10,$00,$00,$00,$00,$00 ; $60
+        .byte $00,$00,$70,$88,$F8,$88,$88,$00 ; $61
+        .byte $00,$00,$F0,$48,$70,$48,$F0,$00 ; $62
+        .byte $00,$00,$78,$80,$80,$80,$78,$00 ; $63
+        .byte $00,$00,$F0,$48,$48,$48,$F0,$00 ; $64
+        .byte $00,$00,$F0,$80,$E0,$80,$F0,$00 ; $65
+        .byte $00,$00,$F0,$80,$E0,$80,$80,$00 ; $66
+        .byte $00,$00,$78,$80,$B8,$88,$70,$00 ; $67
+        .byte $00,$00,$88,$88,$F8,$88,$88,$00 ; $68
+        .byte $00,$00,$F8,$20,$20,$20,$F8,$00 ; $69
+        .byte $00,$00,$70,$20,$20,$A0,$E0,$00 ; $6A
+        .byte $00,$00,$90,$A0,$C0,$A0,$90,$00 ; $6B
+        .byte $00,$00,$80,$80,$80,$80,$F8,$00 ; $6C
+        .byte $00,$00,$88,$D8,$A8,$88,$88,$00 ; $6D
+        .byte $00,$00,$88,$C8,$A8,$98,$88,$00 ; $6E
+        .byte $00,$00,$F8,$88,$88,$88,$F8,$00 ; $6F
+        .byte $00,$00,$F0,$88,$F0,$80,$80,$00 ; $70
+        .byte $00,$00,$F8,$88,$A8,$90,$E8,$00 ; $71
+        .byte $00,$00,$F8,$88,$F8,$A0,$90,$00 ; $72
+        .byte $00,$00,$78,$80,$70,$08,$F0,$00 ; $73
+        .byte $00,$00,$F8,$20,$20,$20,$20,$00 ; $74
+        .byte $00,$00,$88,$88,$88,$88,$70,$00 ; $75
+        .byte $00,$00,$88,$88,$90,$A0,$40,$00 ; $76
+        .byte $00,$00,$88,$88,$A8,$D8,$88,$00 ; $77
+        .byte $00,$00,$88,$50,$20,$50,$88,$00 ; $78
+        .byte $00,$00,$88,$50,$20,$20,$20,$00 ; $79
+        .byte $00,$00,$F8,$10,$20,$40,$F8,$00 ; $7A
+        .byte $38,$40,$20,$C0,$20,$40,$38,$00 ; $7B
+        .byte $20,$20,$20,$20,$20,$20,$20,$00 ; $7C
+        .byte $E0,$10,$20,$18,$20,$10,$E0,$00 ; $7D
+        .byte $40,$A8,$10,$00,$00,$00,$00,$00 ; $7E
+        .byte $A8,$50,$A8,$50,$A8,$50,$A8,$00 ; $7F
+_fontend
+
+
+;;; VDP-INIT ( -- ) Initializes the VDP to text mode.
+        .entry vdp_init, "VDP-INIT"
+        sep #FLAGM
+        .as
+        ldy #0
+_loop   lda _setup,y
+        sta vdpreg
+        tya
+        ora #$80
+        sta vdpreg
+        iny
+        cpy #8
+        bne _loop
+        rep #FLAGM
+        .al
+        rts
+
+        ;; the setup values of the registers
+_setup  .byte $00,$D0,$02,$00,$00,$20,$00,$F5
+
+
+;;; VDP-CURPOS ( -- x ) Return the current VDP pos.
+        .entry vdp_curpos, "VDP-CURPOS"
+        lda vdp_cp
+        dex
+        dex
+        sta 0,x
+        rts
+
+
+;;; VDP-POS ( pos -- ) Positions the VDP cursor to pos.
+        .entry vdp_pos, "VDP-POS"
+        lda 0,x
+        sta vdp_cp
+        clc
+        adc #$4800
+        sep #FLAGM
+        .as
+        sta vdpreg
+        xba
+        sta vdpreg
+        rep #FLAGM
+        .al
+        inx
+        inx
+        rts
+
+
+;;; EMIT ( char -- ) Prints out char to the VDP at the current pos.
+        .entry emit, "EMIT"
+        lda 0,x
+        sep #FLAGM
+        sta vdpdata
+        rep #FLAGM
+        inc vdp_cp
+        inx
+        inx
+        rts
+
+
+;;; VDP-TYPE ( addr u -- ) If u is greater than zero, display the
+;;; character string specified by c-addr and u on the VDP.
+        ;; : VDP-TYPE   0 ?DO  DUP C@ EMIT 1+  LOOP  DROP ;
+        .entry vdp_type, "VDP-TYPE"
+        jsr lit.body
+        .word 0
+        jmp _loop
+_do     jsr two_to_r.body
+        jsr dup.body
+        jsr c_fetch.body
+        jsr emit.body
+        jsr one_plus.body
+        jsr two_r_from.body
+        jsr one_plus.body
+_loop   jsr loop_runtime.body
+        jsr zero_branch.body
+        .word _do
+        jsr two_drop.body
+_end    jsr drop.body
+        rts
+
+
+;;; BS ( -- ) Go back a space.
+        ;; : BS   BL EMIT  VDP-CURPOS 1- DUP  VDP-POS BL EMIT VDP-POS ;
+        .entry bs, "BS"
+        jsr vdp_curpos.body
+        jsr one_minus.body
+        jsr dup.body
+        jsr vdp_pos.body
+        jsr bl.body
+        jsr emit.body
+        jsr vdp_pos.body
+        rts
+
+
+;;; CR ( -- ) Go to the next line.
+        ;; : CR   VDP-CURPOS DUP
+        ;;    DUP 40 MOD -  40 + VDP-POS
+        ;;    919 - 0>  IF  SCROLL  THEN ;
+        .entry cr, "CR"
+        jsr vdp_curpos.body
+        jsr dup.body
+        jsr dup.body
+        jsr lit.body
+        .sint 40
+        jsr mod.body
+        jsr minus.body
+        jsr lit.body
+        .sint 40
+        jsr plus.body
+        jsr vdp_pos.body
+        jsr lit.body
+        .sint 919
+        jsr minus.body
+        jsr zero_greater_than.body
+        jsr zero_branch.body
+        .word _then
+        jsr scroll.body
+_then   rts
+
+
+;;; CURSOR ( -- ) Display a cursor using the underscore character.
+        ;; : CURSOR   95 EMIT  VDP-CURPOS 1- VDP-POS ;
+        .entry cursor, "CURSOR"
+        jsr lit.body
+        .sint 95
+        jsr emit.body
+        jsr vdp_curpos.body
+        jsr one_minus.body
+        jsr vdp_pos.body
+        rts
+
+
+;;; SCROLL ( -- ) Scroll the screen up by a row.
+        .entry scroll, "SCROLL"
+        stx tmp
+        lda #$0800+40
+        sta tmp+2
+        ldx #23
+
+_vloop  lda tmp+2
+        sep #FLAGM
+        sta vdpreg
+        xba
+        sta vdpreg
+        rep #FLAGM
+
+        ldy #0
+        sep #FLAGM
+_hloop  lda vdpdata
+        sta tmp+4,y
+        iny
+        cpy #40
+        bne _hloop
+        rep #FLAGM
+
+        lda tmp+2
+        sec
+        sbc #40
+        ora #$4000
+        sep #FLAGM
+        sta vdpreg
+        xba
+        sta vdpreg
+        rep #FLAGM
+
+        ldy #0
+        sep #FLAGM
+_hloop2 lda tmp+4,y
+        sta vdpdata
+        iny
+        cpy #40
+        bne _hloop2
+        rep #FLAGM
+
+        lda tmp+2
+        clc
+        adc #40
+        sta tmp+2
+
+        dex
+        bne _vloop
+
+        lda #$4800+920
+        sep #FLAGM
+        .as
+        sta vdpreg
+        xba
+        sta vdpreg
+        ldy #40
+        lda #$20
+_bloop  sta vdpdata
+        nop
+        dey
+        bne _bloop
+        rep #FLAGM
+        .al
+
+        ldx tmp
+
+        jsr vdp_curpos.body
+        jsr lit.body
+        .sint 40
+        jsr minus.body
+        jsr vdp_pos.body
+        rts
+
+
+;;; --------------------------------
 ;;;              I/O
 ;;; --------------------------------
 
@@ -1259,34 +1626,6 @@ _newev  lda kbbuf,y             ; A gets the latest key event
         dex
         dex
         and #$FF
-        sta 0,x
-        rts
-
-
-;;; EMIT ( char -- ) Prints out char to the screen.
-        .entry emit, "EMIT"
-        lda 0,x
-        sep #FLAGM
-        .as
-        jsl PUT_CHR
-        rep #FLAGM
-        .al
-        inx
-        inx                     ; pop char
-        rts
-
-
-;;; KEY ( -- char ) Wait for keyboard input and return the character
-;;; corresponding to the key pressed.
-        .entry key, "KEY"
-        sep #FLAGM
-        .as
-        jsl GET_CHR
-        rep #FLAGM
-        .al
-        and #$FF
-        dex
-        dex
         sta 0,x
         rts
 
@@ -1336,9 +1675,9 @@ _then   jsr nip.body
         rts
 
 
-;;; PS2KEY ( -- char ) Wait for PS/2 keyboard input and return the
+;;; KEY ( -- char ) Wait for PS/2 keyboard input and return the
 ;;; character corresponding to the key pressed.
-        ;; : PS2KEY
+        ;; : KEY
         ;;    BEGIN
         ;;       EKEY
         ;;       \ if modifier, set associated bit
@@ -1357,7 +1696,7 @@ _then   jsr nip.body
         ;;          $20 XOR
         ;;       THEN
         ;;    ?DUP UNTIL ;
-        .entry pstwo_key, "PS2KEY"
+        .entry key, "KEY"
 _begin  jsr ekey.body
 
         jsr dup.body
@@ -1491,18 +1830,23 @@ _sscode .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$09,'~',$00 ; 
         ;; : REFILL
         ;;    TIB DUP   ( tib addr )
         ;;    BEGIN   ( tib addr )
+        ;;       CURSOR
         ;;       KEY DUP 13 <>   ( tib addr char flag )
         ;;    WHILE   ( tib addr char )
-        ;;       DUP EMIT DUP 8 =   ( tib addr char flag )
-        ;;       IF  DROP 1- TIB MAX  ELSE  OVER ! 1+  THEN   ( tib addr' )
+        ;;       DUP 8 =   ( tib addr char flag )
+        ;;          IF  BL EMIT BS BS DROP  1- TIB MAX
+        ;;          ELSE  DUP EMIT  OVER ! 1+
+        ;;       THEN   ( tib addr' )
         ;;    REPEAT   ( tib addr char )
+        ;;    BL EMIT BS
         ;;    DROP OVER - (SOURCE) 2! ( )
         ;;    0 >IN ! ;
         .entry refill, "REFILL"
         jsr lit.body
         .word tib
         jsr dup.body
-_begin  jsr key.body
+_begin  jsr cursor.body
+        jsr key.body
         jsr dup.body
         jsr lit.body
         .sint 13
@@ -1510,24 +1854,32 @@ _begin  jsr key.body
         jsr zero_branch.body
         .word _end
         jsr dup.body
-        jsr emit.body
-        jsr dup.body
         jsr lit.body
         .sint 8
         jsr equal.body
         jsr zero_branch.body
         .word _else
+        jsr bl.body
+        jsr emit.body
+        jsr bs.body
+        jsr bs.body
         jsr drop.body
         jsr one_minus.body
         jsr lit.body
         .word tib
         jsr max.body
         jmp _then
-_else   jsr over.body
+_else   jsr dup.body
+        jsr emit.body
+        jsr cursor.body
+        jsr over.body
         jsr store.body
         jsr one_plus.body
 _then   jmp _begin
-_end    jsr drop.body
+_end    jsr bl.body
+        jsr emit.body
+        jsr bs.body
+        jsr drop.body
         jsr over.body
         jsr minus.body
         jsr source_.body
@@ -1704,11 +2056,13 @@ _loop
 _print_ok
         jsr lit.body
         .word _ok
-_type   jsr typen.body
+_type   jsr count.body
+        jsr vdp_type.body
+        jsr cr.body
         jmp _loop
 
-_ok     .null "  ok", $0D
-_comp   .null "  compiled", $0D
+_ok     .ptext "  ok"
+_comp   .ptext "  compiled"
 
 
 ;;; SOURCE ( -- addr u ) Return the address and length of the input
@@ -1950,7 +2304,7 @@ _again  rts
         jsr lit.body
         .word $29
         jsr parse.body
-        jsr type.body
+        jsr vdp_type.body
         rts
 
 
@@ -2151,15 +2505,15 @@ _set_neg
 
         ;; Signal an error
 _error
-        sep #FLAGM
-        .as
-        lda #0
-        ldx #_err_msg
-        jsl PUT_STR
         rep #FLAGM
         .al
+        jsr lit.body
+        .word _err_msg
+        jsr count.body
+        jsr vdp_type.body
+        jsr cr.body
         jsr abort.body
-_err_msg .null "Could not find word in dictionary"
+_err_msg .ptext "  not found"
 
 
 ;;; POSTPONE <name> Append the compilation behavior of name to
@@ -2276,23 +2630,6 @@ _end    jsr drop.body
         rts
 
 
-;;; TYPEN ( addr -- ) Type a null-terminated string to the terminal.
-        .entry typen, "TYPEN"
-        lda 0,x                 ; load addr to a
-        stx tmp                 ; save stack pointer
-        tax                     ; load addr to x
-        sep #FLAGM
-        .as
-        lda #0
-        jsl PUT_STR
-        rep #FLAGM
-        .al
-        ldx tmp                 ; restore stack pointer
-        inx
-        inx                     ; pop addr
-        rts
-
-
 ;;; 0= ( n -- flag ) Return true when n == 0.
         .entry zero_equal, "0="
         lda 0,x
@@ -2331,113 +2668,6 @@ _true   lda #-1
 _true   lda #-1
         sta 0,x                 ; if n!=0, flag = -1
         rts
-
-
-;;; FONT ( -- addr len ) ASCII encoded font for vdp, starting at
-;;; character 20.  Comes from TMS9918 datasheet
-        .entry font, "FONT"
-        jsr lit.body
-        .word _font
-        jsr lit.body
-        .word _fontend-_font
-        rts
-_font   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; $20
-        .byte $20,$20,$20,$20,$20,$00,$20,$00 ; $21
-        .byte $50,$50,$50,$00,$00,$00,$00,$00 ; $22
-        .byte $50,$50,$F8,$50,$F8,$50,$50,$00 ; $23
-        .byte $20,$78,$A0,$70,$28,$F0,$20,$00 ; $24
-        .byte $C0,$C8,$10,$20,$40,$98,$18,$00 ; $25
-        .byte $40,$A0,$A0,$40,$A8,$90,$68,$00 ; $26
-        .byte $20,$20,$20,$00,$00,$00,$00,$00 ; $27
-        .byte $20,$40,$80,$80,$80,$40,$20,$00 ; $28
-        .byte $20,$10,$08,$08,$08,$10,$20,$00 ; $29
-        .byte $20,$A8,$70,$20,$70,$A8,$20,$00 ; $2A
-        .byte $00,$20,$20,$F8,$20,$20,$00,$00 ; $2B
-        .byte $00,$00,$00,$00,$20,$20,$40,$00 ; $2C
-        .byte $00,$00,$00,$F8,$00,$00,$00,$00 ; $2D
-        .byte $00,$00,$00,$00,$00,$00,$20,$00 ; $2E
-        .byte $00,$08,$10,$20,$40,$80,$00,$00 ; $2F
-        .byte $70,$88,$98,$A8,$C8,$88,$70,$00 ; $30
-        .byte $20,$60,$20,$20,$20,$20,$70,$00 ; $31
-        .byte $70,$88,$08,$30,$40,$80,$F8,$00 ; $32
-        .byte $F8,$08,$10,$30,$08,$88,$70,$00 ; $33
-        .byte $10,$30,$50,$90,$F8,$10,$10,$00 ; $34
-        .byte $F8,$80,$F0,$08,$08,$88,$70,$00 ; $35
-        .byte $38,$40,$80,$F0,$88,$88,$70,$00 ; $36
-        .byte $F8,$08,$10,$20,$40,$40,$40,$00 ; $37
-        .byte $70,$88,$88,$70,$88,$88,$70,$00 ; $38
-        .byte $70,$88,$88,$78,$08,$10,$E0,$00 ; $39
-        .byte $00,$00,$20,$00,$20,$00,$00,$00 ; $3A
-        .byte $00,$00,$20,$00,$20,$20,$40,$00 ; $3B
-        .byte $10,$20,$40,$80,$40,$20,$10,$00 ; $3C
-        .byte $00,$00,$F8,$00,$F8,$00,$00,$00 ; $3D
-        .byte $40,$20,$10,$08,$10,$20,$40,$00 ; $3E
-        .byte $70,$88,$10,$20,$20,$00,$20,$00 ; $3F
-        .byte $70,$88,$A8,$B8,$B0,$80,$78,$00 ; $40
-        .byte $20,$50,$88,$88,$F8,$88,$88,$00 ; $41
-        .byte $F0,$88,$88,$F0,$88,$88,$F0,$00 ; $42
-        .byte $70,$88,$80,$80,$80,$88,$70,$00 ; $43
-        .byte $F0,$88,$88,$88,$88,$88,$F0,$00 ; $44
-        .byte $F8,$80,$80,$F0,$80,$80,$F8,$00 ; $45
-        .byte $F8,$80,$80,$F0,$80,$80,$80,$00 ; $46
-        .byte $78,$80,$80,$80,$98,$88,$78,$00 ; $47
-        .byte $88,$88,$88,$F8,$88,$88,$88,$00 ; $48
-        .byte $70,$20,$20,$20,$20,$20,$70,$00 ; $49
-        .byte $08,$08,$08,$08,$08,$88,$70,$00 ; $4A
-        .byte $88,$90,$A0,$C0,$A0,$90,$88,$00 ; $4B
-        .byte $80,$80,$80,$80,$80,$80,$F8,$00 ; $4C
-        .byte $88,$D8,$A8,$A8,$88,$88,$88,$00 ; $4D
-        .byte $88,$88,$C8,$A8,$98,$88,$88,$00 ; $4E
-        .byte $70,$88,$88,$88,$88,$88,$70,$00 ; $4F
-        .byte $F0,$88,$88,$F0,$80,$80,$80,$00 ; $50
-        .byte $70,$88,$88,$88,$A8,$90,$68,$00 ; $51
-        .byte $F0,$88,$88,$F0,$A0,$90,$88,$00 ; $52
-        .byte $70,$88,$80,$70,$08,$88,$70,$00 ; $53
-        .byte $F8,$20,$20,$20,$20,$20,$20,$00 ; $54
-        .byte $88,$88,$88,$88,$88,$88,$70,$00 ; $55
-        .byte $88,$88,$88,$88,$88,$50,$20,$00 ; $56
-        .byte $88,$88,$88,$A8,$A8,$D8,$88,$00 ; $57
-        .byte $88,$88,$50,$20,$50,$88,$88,$00 ; $58
-        .byte $88,$88,$50,$20,$20,$20,$20,$00 ; $59
-        .byte $F8,$08,$10,$20,$40,$80,$F8,$00 ; $5A
-        .byte $F8,$C0,$C0,$C0,$C0,$C0,$F8,$00 ; $5B
-        .byte $00,$80,$40,$20,$10,$08,$00,$00 ; $5C
-        .byte $F8,$18,$18,$18,$18,$18,$F8,$00 ; $5D
-        .byte $00,$00,$20,$50,$88,$00,$00,$00 ; $5E
-        .byte $00,$00,$00,$00,$00,$00,$00,$F8 ; $5F
-        .byte $40,$20,$10,$00,$00,$00,$00,$00 ; $60
-        .byte $00,$00,$70,$88,$F8,$88,$88,$00 ; $61
-        .byte $00,$00,$F0,$48,$70,$48,$F0,$00 ; $62
-        .byte $00,$00,$78,$80,$80,$80,$78,$00 ; $63
-        .byte $00,$00,$F0,$48,$48,$48,$F0,$00 ; $64
-        .byte $00,$00,$F0,$80,$E0,$80,$F0,$00 ; $65
-        .byte $00,$00,$F0,$80,$E0,$80,$80,$00 ; $66
-        .byte $00,$00,$78,$80,$B8,$88,$70,$00 ; $67
-        .byte $00,$00,$88,$88,$F8,$88,$88,$00 ; $68
-        .byte $00,$00,$F8,$20,$20,$20,$F8,$00 ; $69
-        .byte $00,$00,$70,$20,$20,$A0,$E0,$00 ; $6A
-        .byte $00,$00,$90,$A0,$C0,$A0,$90,$00 ; $6B
-        .byte $00,$00,$80,$80,$80,$80,$F8,$00 ; $6C
-        .byte $00,$00,$88,$D8,$A8,$88,$88,$00 ; $6D
-        .byte $00,$00,$88,$C8,$A8,$98,$88,$00 ; $6E
-        .byte $00,$00,$F8,$88,$88,$88,$F8,$00 ; $6F
-        .byte $00,$00,$F0,$88,$F0,$80,$80,$00 ; $70
-        .byte $00,$00,$F8,$88,$A8,$90,$E8,$00 ; $71
-        .byte $00,$00,$F8,$88,$F8,$A0,$90,$00 ; $72
-        .byte $00,$00,$78,$80,$70,$08,$F0,$00 ; $73
-        .byte $00,$00,$F8,$20,$20,$20,$20,$00 ; $74
-        .byte $00,$00,$88,$88,$88,$88,$70,$00 ; $75
-        .byte $00,$00,$88,$88,$90,$A0,$40,$00 ; $76
-        .byte $00,$00,$88,$88,$A8,$D8,$88,$00 ; $77
-        .byte $00,$00,$88,$50,$20,$50,$88,$00 ; $78
-        .byte $00,$00,$88,$50,$20,$20,$20,$00 ; $79
-        .byte $00,$00,$F8,$10,$20,$40,$F8,$00 ; $7A
-        .byte $38,$40,$20,$C0,$20,$40,$38,$00 ; $7B
-        .byte $20,$20,$20,$20,$20,$20,$20,$00 ; $7C
-        .byte $E0,$10,$20,$18,$20,$10,$E0,$00 ; $7D
-        .byte $40,$A8,$10,$00,$00,$00,$00,$00 ; $7E
-        .byte $A8,$50,$A8,$50,$A8,$50,$A8,$00 ; $7F
-_fontend
 
 
 cp_val  = *                     ; Current pointer at load time
