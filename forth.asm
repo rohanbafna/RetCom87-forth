@@ -12,9 +12,10 @@ smudge  = $40                   ; smudge bit bitmask
 noctrl  = $1F                   ; no control bits bitmask
 kbbuf   = $0200                 ; keyboard scancode buffer
 kblshf  = $01                   ; left shift modifier
+cp_val  = $0300                 ; Start of dictionary in RAM
 
 ;;; Direct page variables
-*       = $C0
+        .virtual $C0
 cp_v    .word ?                 ; Pointer to the next cell in dict
 toin_v  .word ?                 ; Current offset into TIB.
 vdp_cp  .word ?                 ; Current VDP pos.
@@ -24,14 +25,19 @@ kbwoff  .byte ?                 ; Write offset of keyboard circular
 kbroff  .byte ?                 ; Read offset of keyboard circular
                                 ; buffer
 kbpar   .byte ?                 ; Keyboard parity store
+dict_head
+        .word ?                 ; Latest entry in the dictionary
+keymod_val
+        .word ?                 ; Holds modifier bits for keyboard
+n_tib   .word ?
+s_addr  .word ?
+state_val
+        .word ?
 tmp                             ; Temporary storage
-
-;;; Register keyboard interrupt handler
-        * = $0104               ; Non maskable interrupt vector
-        jmp kbint
+        .endvirtual
 
 ;;; Main program
-        * = $0300
+        ;; * = $0300
 
         clc
         xce
@@ -60,6 +66,16 @@ tmp                             ; Temporary storage
         stz kbwoff
         stz kbpar
         stz kbstate
+
+        ;; Register keyboard interrupt handler by writing the
+        ;; instruction jmp kbint to $0104, the NMI interrupt handler
+        ;; set by the monitor.
+        lda #$4c                ; opcode for jmp
+        sta $0104
+        lda #kbint & $FF        ; low byte of kbint
+        sta $0105
+        lda #kbint >> 8         ; high byte of kbint
+        sta $0106
 
         ;; Enable keyboard interrupt by setting BCR6 to 1 and BCR5 to
         ;; 0.
@@ -1184,7 +1200,6 @@ _then   rts
         jsr lit.body
         .word dict_head
         rts
-dict_head .word 0
 
 
 ;;; PREV-ENTRY ( addr -- addr' | 0 ) Replace addr, which points to a
@@ -1635,9 +1650,8 @@ _newev  lda kbbuf,y             ; A gets the latest key event
 ;;; right now.)
         .entry keymod, "KEYMOD"
         jsr lit.body
-        .word _val
+        .word keymod_val
         rts
-_val    .word 0
 
 
 ;;; EKEY>MODMASK ( x1 -- x2 ) Converts the given event x1 to the
@@ -2079,11 +2093,8 @@ _comp   .ptext "  compiled"
 ;;; containing the address of the input buffer.
         .entry source_, "(SOURCE)"
         jsr lit.body
-        .word _data
+        .word n_tib
         rts
-_data
-n_tib   .word 0
-s_addr  .word tib
 
 
 ;;; >IN ( -- addr ) Return the address of a cell that contains the
@@ -2602,10 +2613,9 @@ _then1  rts
         .entry state, "STATE"
         dex
         dex
-        ldy #_val
+        ldy #state_val
         sty 0,x
         rts
-_val    .word 0
 
 
 ;;; TYPE ( c-addr u -- ) If u is greater than zero, display the
@@ -2670,5 +2680,4 @@ _true   lda #-1
         rts
 
 
-cp_val  = *                     ; Current pointer at load time
 load_last_entry = last_entry    ; Last entry at load time
