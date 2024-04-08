@@ -12,7 +12,9 @@ smudge  = $40                   ; smudge bit bitmask
 noctrl  = $1F                   ; no control bits bitmask
 kbbuf   = $0200                 ; keyboard scancode buffer
 kblshf  = $01                   ; left shift modifier
-cp_val  = $0300                 ; Start of dictionary in RAM
+
+        ;; Start of dictionary in RAM
+cp_val  = $0300 + ram_routines_sz
 
 ;;; Direct page variables
         .virtual $C0
@@ -37,7 +39,6 @@ tmp                             ; Temporary storage
         .endvirtual
 
 ;;; Main program
-        ;; * = $0300
 
         clc
         xce
@@ -45,6 +46,12 @@ tmp                             ; Temporary storage
         rep #FLAGM|FLAGX
         .al
         .xl
+
+        ;; Copy EEPROM routines to RAM.
+        lda #ram_routines_sz - 1
+        ldx #ram_routines_begin
+        ldy #$0300
+        mvn 0,0
 
         ;; Reset dictionary.
         lda #cp_val
@@ -95,6 +102,14 @@ tmp                             ; Temporary storage
         jsr interpret.body
 
         jmp quit.body
+
+        ;; Routines to be copied into RAM (at the location $0300).
+ram_routines_begin = *
+        .logical $0300
+        .dsection ram_routines
+        .endlogical
+ram_routines_end = *
+ram_routines_sz = ram_routines_end - ram_routines_begin
 
 ;;; Keyboard interrupt handler
         ;; Both X and Y *must* be saved because we are going to enter
@@ -2104,6 +2119,94 @@ _comp   .ptext "  compiled"
         .word toin_v
         rts
 
+
+;;; --------------------------------
+;;;             EEPROM
+;;; --------------------------------
+
+;;; Because these routines modify the EEPROM, the code has to be
+;;; copied to RAM and run from there.  The NMIB interrupt also has to
+;;; be disabled.
+
+
+;;; CLEAR-SECTOR ( addr -- ) Clears the 4K EEPROM sector at addr.
+        .entry clear_sector, "CLEAR-SECTOR"
+        jmp clear_sector_impl
+        .section ram_routines
+clear_sector_impl
+        ;; disable nmib
+        sep #FLAGM
+        .as
+        lda #BCR6
+        trb BCR
+
+        lda #$aa
+        sta $8000+$5555
+        lda #$55
+        sta $8000+$2aaa
+
+        lda #$80
+        sta $8000+$5555
+        lda #$aa
+        sta $8000+$5555
+        lda #$55
+        sta $8000+$2aaa
+
+        lda #$30
+        sta (0,x)
+_wait   lda (0,x)
+        cmp (0,x)
+        bne _wait
+
+        inx
+        inx
+
+        ;; enable nmib
+        lda #BCR6
+        tsb BCR
+
+        rep #FLAGM
+        .al
+        rts
+        .endsection ram_routines
+
+
+;;; EC! ( c addr -- ) Store c at addr, where addr is an EEPROM
+;;; address.
+        .entry ec_store, "EC!"
+        jmp ec_store_impl
+
+        .section ram_routines
+ec_store_impl
+        sep #FLAGM
+        .as
+        lda #BCR6
+        trb BCR
+
+        lda #$aa
+        sta $8000+$5555
+        lda #$55
+        sta $8000+$2aaa
+
+        lda #$a0
+        sta $8000+$5555
+
+        lda 2,x
+        sta (0,x)
+_wait   cmp (0,x)
+        bne _wait
+
+        inx
+        inx
+        inx
+        inx
+
+        lda #BCR6
+        tsb BCR
+        rep #FLAGM
+        .al
+        rts
+        .endsection ram_routines
 
 
 ;;; --------------------------------
