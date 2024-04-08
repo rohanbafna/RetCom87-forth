@@ -3,18 +3,19 @@
         .cpu "65816"
         .include "header.asm"
 
+;;; Memory Map
+init_rsp = $7EFF                ; initial return stack pointer
+init_psp = $7D00                ; initial parameter stack pointer
+tib      = $7F00                ; location of terminal input buffer
+bufadr   = $2000                ; block buffer
+cp_val   = $0300 + ram_routines_sz ; start of RAM dictionary
+
 ;;; Constants
-tib      = $4000                ; location of terminal input buffer
-init_rsp = $5FFF                ; initial return stack pointer
-init_psp = tib                  ; initial parameter stack pointer
 precedence = $80                ; precedence bit bitmask
 smudge  = $40                   ; smudge bit bitmask
 noctrl  = $1F                   ; no control bits bitmask
 kbbuf   = $0200                 ; keyboard scancode buffer
 kblshf  = $01                   ; left shift modifier
-
-        ;; Start of dictionary in RAM
-cp_val  = $0300 + ram_routines_sz
 
 ;;; Direct page variables
         .virtual $C0
@@ -35,7 +36,10 @@ n_tib   .word ?
 s_addr  .word ?
 state_val
         .word ?
+bufblk  .byte ?
 tmp                             ; Temporary storage
+*       = *+8
+        .cerror * >= $0100, "Too many direct page variables"
         .endvirtual
 
 ;;; Main program
@@ -73,6 +77,9 @@ tmp                             ; Temporary storage
         stz kbwoff
         stz kbpar
         stz kbstate
+
+        ;; Mark buffer as free
+        stz bufblk
 
         ;; Register keyboard interrupt handler by writing the
         ;; instruction jmp kbint to $0104, the NMI interrupt handler
@@ -2207,6 +2214,89 @@ _wait   cmp (0,x)
         .al
         rts
         .endsection ram_routines
+
+
+;;; --------------------------------
+;;;           BLOCK I/O
+;;; --------------------------------
+
+
+;;; BLOCK ( u -- addr ) Allocates a buffer for block u and fills it
+;;; with the contents of block u.
+        ;; : BLOCK  DUP 8 + 12 LSHIFT SWAP BUFFER TUCK 4096 CMOVE ;
+        .entry block, "BLOCK"
+        jsr dup.body
+        jsr lit.body
+        .sint 8
+        jsr plus.body
+        jsr lit.body
+        .sint 12
+        jsr lshift.body
+        jsr swap.body
+        jsr buffer.body
+        jsr tuck.body
+        jsr lit.body
+        .sint 4096
+        jsr cmove.body
+        rts
+
+
+;;; BUFFER ( u -- addr ) Allocates a buffer for block u.
+        ;; : BUFFER  FLUSH  bufblk C! bufadr ;
+        .entry buffer, "BUFFER"
+        jsr flush.body
+_then   jsr lit.body
+        .word bufblk
+        jsr c_store.body
+        jsr lit.body
+        .word bufadr
+        rts
+
+
+;;; FLUSH ( -- ) Saves all buffers.  (Right now there's only one).
+        ;; : FLUSH  bufblk C@ ?DUP  IF  8 + 12 LSHIFT   ( addr )
+        ;;    DUP CLEAR-SECTOR  bufadr SWAP   ( bufadr addr )
+        ;;    4096 0  DO  OVER C@ OVER EC!  1+ >R 1+ R>  LOOP  2DROP
+        ;; THEN ;
+        .entry flush, "FLUSH"
+        jsr lit.body
+        .word bufblk
+        jsr c_fetch.body
+        jsr question_dup.body
+        jsr zero_branch.body
+        .word _then
+        jsr lit.body
+        .sint 8
+        jsr plus.body
+        jsr lit.body
+        .sint 12
+        jsr lshift.body
+        jsr dup.body
+        jsr clear_sector.body
+        jsr lit.body
+        .word bufadr
+        jsr swap.body
+        jsr lit.body
+        .sint 4096
+        jsr lit.body
+        .sint 0
+_do     jsr two_to_r.body
+        jsr over.body
+        jsr c_fetch.body
+        jsr over.body
+        jsr ec_store.body
+        jsr one_plus.body
+        jsr to_r.body
+        jsr one_plus.body
+        jsr r_from.body
+        jsr two_r_from.body
+        jsr one_plus.body
+        jsr loop_runtime.body
+        jsr zero_branch.body
+        .word _do
+        jsr two_drop.body
+        jsr two_drop.body
+_then   rts
 
 
 ;;; --------------------------------
