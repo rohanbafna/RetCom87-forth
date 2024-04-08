@@ -37,6 +37,4 @@ CLEAR-VRAM LOAD-FONT VDP-INIT 0 VDP-POS
 
 : CLEAR   0 VDP-POS  960 0 DO  BL EMIT  LOOP  0 VDP-POS ;
 
-CLEAR
-.( FORTH booted successfully )
-CR
+CLEAR .( FORTH booted successfully ) CR QUIT

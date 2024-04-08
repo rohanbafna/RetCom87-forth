@@ -100,7 +100,7 @@ tmp                             ; Temporary storage
         rep #FLAGM
         .al
 
-        ;; Load boot program.
+        ;; Run boot program.
         lda #boot_t
         sta s_addr
         lda #len(boot)
@@ -108,7 +108,7 @@ tmp                             ; Temporary storage
         stz toin_v
         jsr interpret.body
 
-        jmp quit.body
+        brk
 
         ;; Routines to be copied into RAM (at the location $0300).
 ram_routines_begin = *
